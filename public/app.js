@@ -20,13 +20,15 @@ const map = L.map('map', { preferCanvas: true, zoomControl: false }).setView([46
 L.control.zoom({ position: 'topright' }).addTo(map);
 
 const osmAttr = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>-Mitwirkende';
+const swisstopo = (layer) => L.tileLayer(`https://wmts.geo.admin.ch/1.0.0/${layer}/default/current/3857/{z}/{x}/{y}.jpeg`, {
+  maxZoom: 19, maxNativeZoom: 18, attribution: '&copy; <a href="https://www.swisstopo.admin.ch/">swisstopo</a>',
+});
 const baseLayers = {
-  'Hell (CARTO)': L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-    maxZoom: 19, attribution: `${osmAttr}, &copy; <a href="https://carto.com/attributions">CARTO</a>`,
-  }),
+  'Landeskarte grau (swisstopo)': swisstopo('ch.swisstopo.pixelkarte-grau'),
+  'Landeskarte farbig (swisstopo)': swisstopo('ch.swisstopo.pixelkarte-farbe'),
   OpenStreetMap: L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: osmAttr }),
 };
-const ormAttr = 'Bahninfrastruktur: <a href="https://www.openrailwaymap.org/">OpenRailwayMap</a> (CC-BY-SA)';
+const ormAttr = `${osmAttr} · Bahninfrastruktur: <a href="https://www.openrailwaymap.org/">OpenRailwayMap</a> (CC-BY-SA)`;
 const orm = (style) => L.tileLayer(`https://{s}.tiles.openrailwaymap.org/${style}/{z}/{x}/{y}.png`, {
   subdomains: 'abc', maxZoom: 19, tileSize: 256, attribution: ormAttr,
 });
@@ -36,7 +38,7 @@ const overlays = {
   'OpenRailwayMap: Signale': orm('signals'),
   'OpenRailwayMap: Elektrifizierung': orm('electrification'),
 };
-baseLayers['Hell (CARTO)'].addTo(map);
+baseLayers['Landeskarte grau (swisstopo)'].addTo(map);
 overlays['OpenRailwayMap: Infrastruktur'].addTo(map);
 L.control.layers(baseLayers, overlays, { position: 'topright' }).addTo(map);
 

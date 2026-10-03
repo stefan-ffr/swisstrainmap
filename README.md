@@ -5,7 +5,7 @@ Live-Karte aller Züge in der Schweiz – nachgebaut mit offenen Daten:
 - **Fahrplan:** GTFS-Fahrplan von [opentransportdata.swiss](https://opentransportdata.swiss)
 - **Echtzeit:** GTFS-RT Trip Updates (Verspätungen, Ausfälle) von opentransportdata.swiss
 - **Gleisnetz:** OpenStreetMap-Gleise (via Overpass), damit die Züge den Strecken entlang fahren
-- **Karte:** OpenStreetMap / CARTO als Grundkarte, darüber [OpenRailwayMap](https://www.openrailwaymap.org) (Infrastruktur, Höchstgeschwindigkeiten, Signale, Elektrifizierung)
+- **Karte:** Landeskarte von swisstopo (grau oder farbig) oder OpenStreetMap als Grundkarte, darüber [OpenRailwayMap](https://www.openrailwaymap.org) (Infrastruktur, Höchstgeschwindigkeiten, Signale, Elektrifizierung)
 
 ## Wie funktioniert das?
 
@@ -128,4 +128,4 @@ test/                      Tests (npm test)
 ## Lizenzen der Daten
 
 - Fahrplan- und Echtzeitdaten: opentransportdata.swiss (Nutzungsbedingungen beachten)
-- Kartendaten: © OpenStreetMap-Mitwirkende (ODbL), OpenRailwayMap (CC-BY-SA), CARTO
+- Kartendaten: © swisstopo, © OpenStreetMap-Mitwirkende (ODbL), OpenRailwayMap (CC-BY-SA)
