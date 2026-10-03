@@ -1,5 +1,7 @@
 // Erzeugt einen kleinen, künstlichen Demo-Fahrplan (GTFS als Verzeichnis)
 // mit echten Bahnhofskoordinaten – zum Ausprobieren ohne Download.
+// Dazu ein künstliches Gleisnetz im Overpass-Format (rail-osm.json im selben
+// Verzeichnis) mit geschwungenen Strecken zwischen den Bahnhöfen.
 //   node scripts/make-demo-gtfs.js data/demo-gtfs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -66,4 +68,35 @@ for (const [routeId, short, cat, headway, first, stops] of LINES) {
 
 fs.mkdirSync(outDir, { recursive: true });
 for (const [name, rows] of Object.entries(files)) fs.writeFileSync(path.join(outDir, name), csv(rows));
+// --- Gleisnetz ---------------------------------------------------------------
+// Jede Strecke zwischen zwei benachbarten Halten wird als Kurve gelegt; die
+// Gleise im Bahnhof liegen ~80 m neben dem Haltepunkt (wie in echt).
+const osm = { elements: [] };
+let nodeId = 1;
+const node = (lat, lon) => { osm.elements.push({ type: 'node', id: nodeId, lat, lon }); return nodeId++; };
+const stationNode = {};
+for (const [id, [, lat, lon]] of Object.entries(STOPS)) stationNode[id] = node(lat + 0.0007, lon);
+const built = new Set();
+for (const [, , , , , stops] of LINES) {
+  for (let i = 1; i < stops.length; i++) {
+    const a = stops[i - 1][0], b = stops[i][0];
+    const key = [a, b].sort().join('-');
+    if (built.has(key)) continue;
+    built.add(key);
+    const [, lat1, lon1] = STOPS[a], [, lat2, lon2] = STOPS[b];
+    const sign = key.length % 2 ? 1 : -1;
+    const cLat = (lat1 + lat2) / 2 + sign * (lon2 - lon1) * 0.25;
+    const cLon = (lon1 + lon2) / 2 - sign * (lat2 - lat1) * 0.25;
+    const steps = 40;
+    const refs = [stationNode[a]];
+    for (let s = 1; s < steps; s++) {
+      const t = s / steps, u = 1 - t;
+      refs.push(node(u * u * (lat1 + 0.0007) + 2 * u * t * cLat + t * t * (lat2 + 0.0007), u * u * lon1 + 2 * u * t * cLon + t * t * lon2));
+    }
+    refs.push(stationNode[b]);
+    osm.elements.push({ type: 'way', id: osm.elements.length + 1, nodes: refs, tags: { railway: 'rail' } });
+  }
+}
+fs.writeFileSync(path.join(outDir, 'rail-osm.json'), JSON.stringify(osm));
+
 console.log(`Demo-GTFS geschrieben nach ${outDir} (${files['trips.txt'].length - 1} Fahrten)`);

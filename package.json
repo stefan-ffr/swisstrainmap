@@ -7,7 +7,7 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "demo": "node scripts/make-demo-gtfs.js data/demo-gtfs && GTFS_PATH=data/demo-gtfs node src/server.js",
+    "demo": "node scripts/make-demo-gtfs.js data/demo-gtfs && GTFS_PATH=data/demo-gtfs RAIL_OSM_PATH=data/demo-gtfs/rail-osm.json RAIL_LEGS_CACHE_FILE=data/demo-legs.json node src/server.js",
     "test": "node --test"
   },
   "engines": {

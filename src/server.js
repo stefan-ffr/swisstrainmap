@@ -10,12 +10,27 @@ import { loadGtfs } from './gtfs-loader.js';
 import { Timetable } from './timetable.js';
 import { RealtimeStore } from './realtime.js';
 import { todayKey } from './time.js';
+import { LegStore } from './legs.js';
+import { ensureRailOsm, loadRailNetwork } from './rail-network.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const log = (msg) => console.log(`[${new Date().toISOString()}] ${msg}`);
 
 const state = { timetable: null, loading: false, loadedAt: null, loadError: null };
 const realtime = new RealtimeStore();
+const legStore = config.railRouting ? new LegStore(path.resolve(root, config.railLegsCacheFile), log) : null;
+const legCacheLoaded = legStore?.loadCache();
+
+/** Gleisnetz nur laden, wenn Abschnitte fehlen – danach wieder freigeben. */
+async function computeLegs() {
+  if (!legStore) return;
+  await legStore.computeMissing(async () => {
+    const file = config.railOsmPath
+      ? path.resolve(root, config.railOsmPath)
+      : await ensureRailOsm(config.overpassUrl, path.resolve(root, config.railOsmCacheFile), config.railOsmMaxAgeDays, log);
+    return loadRailNetwork(file, log);
+  });
+}
 
 async function reload() {
   if (state.loading) return;
@@ -30,7 +45,8 @@ async function reload() {
         centerDay: todayKey(Date.now(), config.timeZone),
         log,
       });
-      state.timetable = new Timetable(data, config.timeZone);
+      await legCacheLoaded;
+      state.timetable = new Timetable(data, config.timeZone, legStore);
       state.loadedAt = new Date().toISOString();
       state.loadError = null;
     } finally {
@@ -42,6 +58,7 @@ async function reload() {
   } finally {
     state.loading = false;
   }
+  computeLegs();
 }
 
 // Fenster aus gestern/heute/morgen nachführen, sobald ein neuer Tag beginnt.
@@ -105,12 +122,22 @@ const server = http.createServer((req, res) => {
     if (!tt) return sendJson(req, res, 503, { error: state.loadError || 'Fahrplan wird geladen …' });
     const now = Date.now();
     if (now - cache.at > 2000) cache = { at: now, body: { now, trains: tt.positions(now, realtime) } };
-    return sendJson(req, res, 200, { ...cache.body, serverTime: now });
+    return sendJson(req, res, 200, { ...cache.body, serverTime: now, legsVersion: legStore?.version ?? null });
   }
   if (url.pathname.startsWith('/api/trip/')) {
     if (!tt) return sendJson(req, res, 503, { error: 'Fahrplan wird geladen …' });
     const trip = tt.trip(decodeURIComponent(url.pathname.slice('/api/trip/'.length)), realtime);
+    if (trip) trip.legs = trip.legs.map((id) => legStore?.geometry(id) || '');
     return trip ? sendJson(req, res, 200, trip) : sendJson(req, res, 404, { error: 'Fahrt unbekannt' });
+  }
+  if (url.pathname === '/api/legs') {
+    // { id: Polyline | "" (keine Geometrie, Luftlinie) | null (noch in Berechnung) }
+    const out = {};
+    for (const id of (url.searchParams.get('ids') || '').split(',').slice(0, 2000)) {
+      if (id === '' || !legStore) continue;
+      out[id] = legStore.geometry(Number(id)) ?? null;
+    }
+    return sendJson(req, res, 200, { version: legStore?.version ?? null, legs: out });
   }
   if (url.pathname === '/api/status') {
     return sendJson(req, res, 200, {
@@ -119,6 +146,7 @@ const server = http.createServer((req, res) => {
         days: tt?.days.map((d) => d.day), trips: tt?.data.trips.size,
       },
       realtime: realtime.status,
+      legs: legStore ? { ...legStore.status, enabled: true } : { enabled: false },
     });
   }
   serveStatic(url.pathname, res);

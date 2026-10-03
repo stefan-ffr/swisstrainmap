@@ -27,5 +27,14 @@ export const config = {
   // GTFS route_type, die als "Zug" gelten (2 = Rail, 100–117 = Extended Rail).
   routeTypes: new Set(list(env.ROUTE_TYPES || '2,100,101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117').map(Number)),
 
+  // Gleisnetz aus OpenStreetMap, damit Züge den Strecken entlang fahren.
+  railRouting: env.RAIL_ROUTING !== '0',
+  // Lokale Overpass-JSON-Datei; sonst Download über Overpass mit Cache.
+  railOsmPath: env.RAIL_OSM_PATH || '',
+  overpassUrl: env.OVERPASS_URL || 'https://overpass-api.de/api/interpreter',
+  railOsmCacheFile: env.RAIL_OSM_CACHE_FILE || 'data/rail-osm.json',
+  railOsmMaxAgeDays: Number(env.RAIL_OSM_MAX_AGE_DAYS || 30),
+  railLegsCacheFile: env.RAIL_LEGS_CACHE_FILE || 'data/rail-legs.json',
+
   timeZone: env.TZ_FEED || 'Europe/Zurich',
 };

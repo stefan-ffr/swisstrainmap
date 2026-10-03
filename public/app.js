@@ -65,20 +65,89 @@ const delayStroke = (t) => (!t.rt ? '#ffffff' : { 'delay-ok': '#2e9b45', 'delay-
 const delayText = (sec) => (Math.abs(sec) < 60 ? 'pünktlich' : `${sec > 0 ? '+' : ''}${Math.round(sec / 60)}'`);
 const label = (t) => `${t.name}${t.num ? ` ${t.num}` : ''}`;
 
-/** Position zum Zeitpunkt t aus den Wegpunkten [lat, lon, ankunft, abfahrt]. */
+// --- Streckengeometrie ------------------------------------------------------
+
+const legs = new Map(); // id -> { coords, cum, total } | null (keine Geometrie: Luftlinie)
+let legsVersion = null;
+let legsLoading = false;
+
+function decodePolyline(str) {
+  const coords = [];
+  let i = 0, lat = 0, lon = 0;
+  const dec = () => {
+    let result = 0, shift = 0, b;
+    do { b = str.charCodeAt(i++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+    return result & 1 ? ~(result >> 1) : result >> 1;
+  };
+  while (i < str.length) { lat += dec(); lon += dec(); coords.push([lat / 1e5, lon / 1e5]); }
+  return coords;
+}
+
+function makeLeg(encoded) {
+  if (!encoded) return null;
+  const coords = decodePolyline(encoded);
+  const cum = [0];
+  for (let k = 1; k < coords.length; k++) {
+    const [a, b] = [coords[k - 1], coords[k]];
+    const dx = (b[1] - a[1]) * Math.cos((a[0] * Math.PI) / 180), dy = b[0] - a[0];
+    cum.push(cum[k - 1] + Math.hypot(dx, dy));
+  }
+  return { coords, cum, total: cum[cum.length - 1] };
+}
+
+/** Holt fehlende Legs (in Blöcken); noch nicht berechnete werden später erneut angefragt. */
+async function loadLegs(version, ids) {
+  if (version !== legsVersion) { legs.clear(); legsVersion = version; }
+  const missing = [...new Set(ids)].filter((id) => id >= 0 && !legs.has(id));
+  if (!missing.length || legsLoading) return;
+  legsLoading = true;
+  try {
+    for (let k = 0; k < missing.length; k += 500) {
+      const res = await fetch(`api/legs?ids=${missing.slice(k, k + 500).join(',')}`);
+      const body = await res.json();
+      if (body.version !== legsVersion) return;
+      for (const [id, enc] of Object.entries(body.legs)) {
+        if (enc !== null) legs.set(Number(id), makeLeg(enc));
+      }
+    }
+  } catch { /* nächster Versuch beim nächsten Poll */ } finally {
+    legsLoading = false;
+  }
+}
+
+function alongLeg(leg, f) {
+  const d = f * leg.total;
+  const { coords, cum } = leg;
+  let lo = 0, hi = cum.length - 1;
+  while (lo < hi - 1) { const mid = (lo + hi) >> 1; if (cum[mid] <= d) lo = mid; else hi = mid; }
+  const span = cum[hi] - cum[lo];
+  const g = span > 0 ? (d - cum[lo]) / span : 0;
+  return [coords[lo][0] + (coords[hi][0] - coords[lo][0]) * g, coords[lo][1] + (coords[hi][1] - coords[lo][1]) * g];
+}
+
+/** Standort eines haltenden Zugs: Anfang des folgenden bzw. Ende des vorherigen Legs. */
+function stopPosition(points, j) {
+  const out = legs.get(points[j][4]);
+  if (out) return out.coords[0];
+  const inc = j > 0 ? legs.get(points[j - 1][4]) : null;
+  if (inc) return inc.coords[inc.coords.length - 1];
+  return [points[j][0], points[j][1]];
+}
+
+/** Position zum Zeitpunkt t aus den Wegpunkten [lat, lon, ankunft, abfahrt, legId]. */
 function positionAt(points, t) {
-  let p = points[0];
-  if (t < p[3]) return [p[0], p[1]];
+  if (t < points[0][3]) return stopPosition(points, 0);
   for (let j = 0; j < points.length - 1; j++) {
     const a = points[j], b = points[j + 1];
     if (t <= b[2]) {
-      const f = b[2] > a[3] ? (t - a[3]) / (b[2] - a[3]) : 1;
+      const f = b[2] > a[3] ? Math.max(0, (t - a[3]) / (b[2] - a[3])) : 1;
+      const leg = legs.get(a[4]);
+      if (leg) return alongLeg(leg, f);
       return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f];
     }
-    if (t < b[3]) return [b[0], b[1]];
-    p = b;
+    if (t < b[3]) return stopPosition(points, j + 1);
   }
-  return [p[0], p[1]];
+  return stopPosition(points, points.length - 1);
 }
 
 function matches(t) {
@@ -113,6 +182,7 @@ async function poll() {
     }
     applyFilter();
     updateStats();
+    loadLegs(body.legsVersion, body.trains.flatMap((t) => t.points.map((p) => p[4])));
     if (selectedId) showDetails(selectedId, false);
   } catch (err) {
     $('stats').textContent = `Keine Daten: ${err.message}`;
@@ -127,6 +197,10 @@ async function pollStatus() {
       ? `Echtzeit: ${rt.trips} Fahrten mit Prognose${rt.lastSuccess ? `, Stand ${fmtTime(Date.parse(rt.lastSuccess))}` : ''}`
       : 'Echtzeit aus – Positionen nach Fahrplan (GTFS_RT_API_KEY setzen)';
     if (rt.lastError) text += ` · Fehler: ${rt.lastError}`;
+    const lg = s.legs;
+    if (lg?.error) text += ` · Gleisnetz: ${lg.error}`;
+    else if (lg?.running) text += ` · Strecken werden berechnet: ${lg.done}/${lg.total}`;
+    else if (lg?.total) text += ` · ${lg.routed}/${lg.total} Abschnitte auf Gleisen`;
     $('status').textContent = text;
   } catch { /* ignorieren */ }
 }
@@ -213,7 +287,9 @@ async function showDetails(id, fit) {
   const t = now();
 
   routeLayer.clearLayers();
-  const line = L.polyline(trip.stops.map((s) => [s.lat, s.lon]), { color: colorOf(trip.cat), weight: 4, opacity: 0.7, dashArray: '6 6' });
+  // Leg k verbindet Halt k mit k+1; ohne Geometrie direkt von Halt zu Halt
+  const path = trip.stops.flatMap((s, k) => (trip.legs[k] ? decodePolyline(trip.legs[k]) : [[s.lat, s.lon]]));
+  const line = L.polyline(path, { color: colorOf(trip.cat), weight: 4, opacity: 0.6 });
   routeLayer.addLayer(line);
   for (const s of trip.stops) routeLayer.addLayer(L.circleMarker([s.lat, s.lon], { radius: 3, color: colorOf(trip.cat), weight: 2, fillColor: '#fff', fillOpacity: 1 }));
   if (fit) map.fitBounds(line.getBounds(), { paddingTopLeft: [window.innerWidth > 600 ? 360 : 20, 40], paddingBottomRight: [40, 40], maxZoom: 12 });

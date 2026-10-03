@@ -4,6 +4,7 @@ Live-Karte aller Züge in der Schweiz – nachgebaut mit offenen Daten:
 
 - **Fahrplan:** GTFS-Fahrplan von [opentransportdata.swiss](https://opentransportdata.swiss)
 - **Echtzeit:** GTFS-RT Trip Updates (Verspätungen, Ausfälle) von opentransportdata.swiss
+- **Gleisnetz:** OpenStreetMap-Gleise (via Overpass), damit die Züge den Strecken entlang fahren
 - **Karte:** OpenStreetMap / CARTO als Grundkarte, darüber [OpenRailwayMap](https://www.openrailwaymap.org) (Infrastruktur, Höchstgeschwindigkeiten, Signale, Elektrifizierung)
 
 ## Wie funktioniert das?
@@ -15,9 +16,17 @@ bekannten Zugradar-Karten – **berechnet**:
    von gestern/heute/morgen, damit der Speicher klein bleibt). Bei Tageswechsel wird neu geladen.
 2. Alle 35 s holt er GTFS-RT Trip Updates und rechnet die Verspätungen auf die Halte der Fahrt um
    (Verspätungen werden auf nachfolgende Halte übertragen, ausgefallene Fahrten ausgeblendet).
-3. `/api/trains` liefert für jeden fahrenden Zug den aktuellen Halt plus die nächsten Wegpunkte mit
+3. Das Gleisnetz der Schweiz wird aus OpenStreetMap geladen (`railway=rail|narrow_gauge|light_rail|funicular`,
+   ohne Rangiergleise). Für jedes Paar aufeinanderfolgender Halte sucht der Server per A* den Weg über die
+   Gleise – über gerichtete Gleisabschnitte, sodass Züge an Weichen nicht „umkehren“ (max. 70° Richtungsänderung
+   pro Knoten, notfalls 110°). Die Wege werden vereinfacht, in `data/rail-legs.json` gespeichert und bei
+   späteren Starts wiederverwendet; das Gleisnetz wird nur geladen, wenn neue Abschnitte fehlen. Findet sich
+   kein plausibler Weg (z. B. ausserhalb des Kartenausschnitts), fährt der Zug auf der Luftlinie.
+4. `/api/trains` liefert für jeden fahrenden Zug den aktuellen Halt plus die nächsten Wegpunkte mit
    (erwarteten) Ankunfts-/Abfahrtszeiten.
-4. Der Browser interpoliert daraus selbst die Position und animiert die Züge flüssig; neue Daten alle 10 s.
+   Jeder Wegpunkt trägt die ID des folgenden Streckenabschnitts.
+5. Der Browser holt die Geometrie der Abschnitte einmalig (`/api/legs`), interpoliert die Position entlang der
+   Gleise und animiert die Züge flüssig; neue Positionsdaten alle 10 s.
 
 ## Starten
 
@@ -66,13 +75,21 @@ Fahrplan und Prognose.
 | `GTFS_RT_API_KEY` | – | API-Key für GTFS-RT |
 | `GTFS_RT_INTERVAL` | `35` | Abfrageintervall GTFS-RT in Sekunden (Minimum 30) |
 | `GTFS_RT_CACHE_FILE` | `data/gtfs-rt.pb` | Letzter GTFS-RT-Feed (für Neustarts) |
+| `RAIL_ROUTING` | `1` | `0` = Gleisnetz nicht verwenden (Luftlinie) |
+| `RAIL_OSM_PATH` | – | Lokale Overpass-JSON-Datei mit dem Gleisnetz (statt Download) |
+| `OVERPASS_URL` | `https://overpass-api.de/api/interpreter` | Overpass-Endpunkt für den Download |
+| `RAIL_OSM_CACHE_FILE` | `data/rail-osm.json` | Ablage des heruntergeladenen Gleisnetzes |
+| `RAIL_OSM_MAX_AGE_DAYS` | `30` | Danach wird das Gleisnetz neu geladen (nur falls Abschnitte fehlen) |
+| `RAIL_LEGS_CACHE_FILE` | `data/rail-legs.json` | Berechnete Streckenabschnitte |
 | `ROUTE_TYPES` | `2,100,…,117` | GTFS `route_type`s, die als Zug gelten (z. B. zusätzlich `400,900` für Metro/Tram) |
 
 ## API
 
 - `GET /api/trains` – alle fahrenden Züge: Name, Kategorie, Zugnummer, Ziel, Verspätung, aktueller/nächster
   Halt und `points: [[lat, lon, ankunftMs, abfahrtMs], …]`
-- `GET /api/trip/<tripId>|<YYYYMMDD>` – Halteliste mit Soll- und Prognosezeiten
+- `GET /api/legs?ids=1,2,…` – Geometrie der Streckenabschnitte als Google-Polyline (`""` = Luftlinie,
+  `null` = wird noch berechnet)
+- `GET /api/trip/<tripId>|<YYYYMMDD>` – Halteliste mit Soll- und Prognosezeiten und Streckenverlauf
 - `GET /api/status` – Zustand von Fahrplan- und Echtzeit-Import
 
 ## Projektstruktur
@@ -83,17 +100,22 @@ src/gtfs-source.js         ZIP/Verzeichnis lesen, Download mit Cache
 src/gtfs-loader.js         GTFS-Import (gefiltert auf Bahn und Datumsfenster)
 src/timetable.js           Positionsberechnung inkl. Verspätungen
 src/realtime.js            GTFS-RT-Abfrage und -Dekodierung
+src/rail-network.js        OSM-Gleisnetz laden, Wegsuche (A*) zwischen Halten
+src/legs.js                Streckenabschnitte verwalten und zwischenspeichern
+src/polyline.js            Linien vereinfachen und kodieren
 public/                    Leaflet-Frontend
-scripts/make-demo-gtfs.js  Demo-Fahrplan erzeugen
+scripts/make-demo-gtfs.js  Demo-Fahrplan und Demo-Gleisnetz erzeugen
 test/                      Tests (npm test)
 ```
 
 ## Grenzen & Ideen für später
 
-- **Geradlinige Interpolation:** Der Schweizer GTFS-Feed enthält keine `shapes.txt`, daher fahren die Züge
-  auf der Luftlinie zwischen zwei Halten. Verbesserung: Gleisgeometrie aus OpenStreetMap (`railway=rail`,
-  z. B. via Overpass oder einem Geofabrik-Extrakt) laden und den Weg zwischen den Halten per Routing auf dem
-  Gleisnetz bestimmen.
+- **Streckenwahl geschätzt:** Der Schweizer GTFS-Feed enthält keine `shapes.txt` und keine Durchfahrtspunkte.
+  Zwischen zwei Halten wird daher der kürzeste Weg auf den Gleisen angenommen. Fährt ein Zug planmässig einen
+  Umweg (z. B. Bergstrecke statt Basistunnel ohne Halt dazwischen), stimmt die gezeichnete Strecke nicht.
+- **Gleichmässige Geschwindigkeit:** Zwischen zwei Halten fährt der Zug mit konstantem Tempo (kein Anfahren/Bremsen).
+- Der erste Download des Gleisnetzes über Overpass kann einige Minuten dauern und braucht beim Einlesen
+  rund 1–2 GB RAM; danach reichen die gespeicherten Abschnitte.
 - **Keine echten GPS-Daten:** Die Position ist eine Schätzung aus Fahrplan + Prognose.
 - Der Landesfahrplan (inkl. Bus) ist gross; der erste Import dauert je nach Rechner etwa 1–2 Minuten und
   braucht einige hundert MB RAM.

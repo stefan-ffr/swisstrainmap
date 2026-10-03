@@ -1,17 +1,29 @@
 // Berechnet aus Fahrplan (+ optional Echtzeit-Verspätungen) die aktuelle
-// Position aller Züge. Ohne Streckengeometrie wird geradlinig zwischen
-// zwei aufeinanderfolgenden Halten interpoliert.
+// Position aller Züge. Jeder Wegpunkt trägt die ID des folgenden Legs
+// (Streckengeometrie bis zum nächsten Halt); der Browser interpoliert entlang
+// dieser Geometrie bzw. geradlinig, solange sie fehlt.
 import { serviceDayStart } from './time.js';
 
 // So viele kommende Wegpunkte bekommt der Browser, um selbst flüssig zu animieren.
-const LOOKAHEAD = 4;
+const LOOKAHEAD = 3;
 // Puffer für verspätete Züge, die nach Fahrplan schon angekommen wären.
 const MAX_DELAY = 3 * 3600;
 
 export class Timetable {
-  constructor(data, timeZone) {
+  constructor(data, timeZone, legStore = null) {
     this.data = data;
     this.timeZone = timeZone;
+    if (legStore) {
+      // jedem Abschnitt Halt k -> k+1 eine Leg-ID (Streckengeometrie) zuordnen
+      const { lat, lon } = data.stops;
+      for (const trip of data.trips.values()) {
+        trip.leg = new Int32Array(trip.stop.length - 1);
+        for (let k = 0; k < trip.leg.length; k++) {
+          const a = trip.stop[k], b = trip.stop[k + 1];
+          trip.leg[k] = legStore.idFor([lat[a], lon[a]], [lat[b], lon[b]]);
+        }
+      }
+    }
     this.days = data.days.map((day) => {
       const active = data.services.get(day);
       const list = [];
@@ -108,7 +120,7 @@ export class Timetable {
       const points = [];
       for (let j = k; j < Math.min(n, k + LOOKAHEAD + 1); j++) {
         const s = trip.stop[j];
-        points.push([stops.lat[s], stops.lon[s], dayStart + A[j] * 1000, dayStart + D[j] * 1000]);
+        points.push([stops.lat[s], stops.lon[s], dayStart + A[j] * 1000, dayStart + D[j] * 1000, trip.leg?.[j] ?? -1]);
       }
       const next = Math.min(n - 1, dwelling ? k : k + 1);
       const route = trip.route;
@@ -160,6 +172,7 @@ export class Timetable {
       rt: realtime?.has(trip.id, day.day) || false,
       canceled,
       stops: list,
+      legs: trip.leg ? Array.from(trip.leg) : [],
     };
   }
 }
