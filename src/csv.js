@@ -21,20 +21,23 @@ export function parseLine(line) {
 }
 
 /**
- * Liest eine CSV-Datei zeilenweise und ruft onRow(row, idx) auf.
- * idx bildet Spaltennamen auf Positionen ab (fehlende Spalte -> undefined).
+ * Liest eine CSV-Datei zeilenweise und ruft onRow(row, idx, line) auf.
+ * idx bildet Spaltennamen auf Positionen ab (fehlende Spalte -> undefined),
+ * line ist die Originalzeile. Mit onHeader(line, idx) erhält man die Kopfzeile.
+ * Gibt parse=false an, ist row null (schneller, wenn nur line gebraucht wird).
  */
-export async function readCsv(stream, onRow) {
+export async function readCsv(stream, onRow, { onHeader, parse = true } = {}) {
   const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
   let idx = null;
   for await (let line of rl) {
     if (idx === null) {
-      line = line.replace(/^﻿/, '');
+      line = line.replace(/^\uFEFF/, '');
       idx = {};
       parseLine(line).forEach((name, i) => { idx[name.trim()] = i; });
+      onHeader?.(line, idx);
       continue;
     }
     if (line === '') continue;
-    onRow(parseLine(line), idx);
+    onRow(parse ? parseLine(line) : null, idx, line);
   }
 }

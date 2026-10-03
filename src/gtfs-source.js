@@ -37,21 +37,46 @@ export async function openGtfs(filePath) {
   };
 }
 
-/** Lädt den Feed herunter, falls der Cache fehlt oder älter als maxAgeHours ist. */
-export async function ensureDownloaded(url, cacheFile, maxAgeHours, log = console.log) {
-  try {
-    const stat = await fsp.stat(cacheFile);
-    const ageHours = (Date.now() - stat.mtimeMs) / 3600e3;
-    if (ageHours < maxAgeHours) return cacheFile;
-  } catch { /* noch kein Cache */ }
+/**
+ * Lädt den Feed herunter, wenn es eine neue Version gibt. Der Permalink von
+ * opentransportdata.swiss leitet auf eine Datei mit Datum im Namen weiter
+ * (z. B. gtfs_fp2026_20260930.zip); ist das Ziel unverändert, wird nicht
+ * erneut geladen. Geprüft wird höchstens alle checkHours Stunden.
+ */
+export async function ensureDownloaded(url, cacheFile, checkHours, log = console.log) {
+  const sourceFile = `${cacheFile}.source`;
+  let stat = null;
+  try { stat = await fsp.stat(cacheFile); } catch { /* noch kein Cache */ }
+  if (stat && (Date.now() - stat.mtimeMs) / 3600e3 < checkHours) return cacheFile;
 
-  log(`GTFS: lade ${url} …`);
+  let target = url;
+  try {
+    const head = await fetch(url, { method: 'HEAD', redirect: 'manual' });
+    const location = head.headers.get('location');
+    if (head.status >= 300 && head.status < 400 && location) target = new URL(location, url).href;
+  } catch (err) {
+    if (stat) {
+      log(`GTFS: Versionsprüfung fehlgeschlagen (${err.message}) – verwende vorhandenen Fahrplan`);
+      return cacheFile;
+    }
+    throw err;
+  }
+  const known = await fsp.readFile(sourceFile, 'utf8').catch(() => null);
+  if (stat && target !== url && known === target) {
+    const now = new Date();
+    await fsp.utimes(cacheFile, now, now); // nächste Prüfung erst nach checkHours
+    log(`GTFS: Fahrplan ist aktuell (${path.basename(new URL(target).pathname)})`);
+    return cacheFile;
+  }
+
+  log(`GTFS: lade ${target} …`);
   await fsp.mkdir(path.dirname(cacheFile), { recursive: true });
-  const res = await fetch(url, { redirect: 'follow' });
+  const res = await fetch(target, { redirect: 'follow' });
   if (!res.ok) throw new Error(`GTFS-Download fehlgeschlagen: ${res.status} ${res.statusText}`);
   const tmp = `${cacheFile}.part`;
   await pipeline(Readable.fromWeb(res.body), fs.createWriteStream(tmp));
   await fsp.rename(tmp, cacheFile);
+  await fsp.writeFile(sourceFile, target);
   log(`GTFS: gespeichert unter ${cacheFile}`);
   return cacheFile;
 }

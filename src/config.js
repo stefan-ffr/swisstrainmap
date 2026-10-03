@@ -14,7 +14,10 @@ export const config = {
   // … oder Download-URL (Permalink von opentransportdata.swiss).
   gtfsUrl: env.GTFS_URL || 'https://data.opentransportdata.swiss/dataset/timetable-2026-gtfs2020/permalink',
   gtfsCacheFile: env.GTFS_CACHE_FILE || 'data/gtfs.zip',
-  gtfsMaxAgeHours: Number(env.GTFS_MAX_AGE_HOURS || 24),
+  // So oft wird geprüft, ob es eine neue Fahrplan-Version gibt.
+  gtfsMaxAgeHours: Number(env.GTFS_MAX_AGE_HOURS || 6),
+  // Auszug nur mit Bahnfahrten (wird pro Fahrplan-Version einmal erstellt).
+  gtfsExtractDir: env.GTFS_EXTRACT_DIR || 'data/gtfs-rail',
 
   // GTFS-RT (Trip Updates). Ohne API-Key läuft die Karte rein nach Fahrplan.
   rtUrl: env.GTFS_RT_URL || 'https://api.opentransportdata.swiss/la/gtfs-rt',

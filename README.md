@@ -12,8 +12,9 @@ Live-Karte aller Züge in der Schweiz – nachgebaut mit offenen Daten:
 Es gibt in der Schweiz keine öffentlichen GPS-Positionen der Züge. Die Position wird deshalb – wie bei den
 bekannten Zugradar-Karten – **berechnet**:
 
-1. Beim Start liest der Server den GTFS-Fahrplan ein (nur Bahn-`route_type`s 2 und 100–117 und nur Fahrten
-   von gestern/heute/morgen, damit der Speicher klein bleibt). Bei Tageswechsel wird neu geladen.
+1. Der Server lädt den GTFS-Fahrplan nur, wenn der Permalink auf eine neue Version zeigt, und erstellt daraus
+   einmal einen Auszug nur mit Bahnfahrten (rund 10 % des Landesfahrplans). Beim Start und bei jedem
+   Tageswechsel liest er nur diesen Auszug, und daraus nur die Fahrten von gestern/heute/morgen.
 2. Alle 35 s holt er GTFS-RT Trip Updates und rechnet die Verspätungen auf die Halte der Fahrt um
    (Verspätungen werden auf nachfolgende Halte übertragen, ausgefallene Fahrten ausgeblendet).
 3. Das Gleisnetz der Schweiz wird aus OpenStreetMap geladen (`railway=rail|narrow_gauge|light_rail|funicular`,
@@ -72,7 +73,8 @@ Fahrplan und Prognose.
 | `GTFS_PATH` | – | Lokaler Fahrplan (ZIP oder entpacktes Verzeichnis). Wenn gesetzt, wird nichts heruntergeladen. |
 | `GTFS_URL` | Permalink *timetable-2026-gtfs2020* | Download-URL des GTFS-ZIP. Zum Fahrplanwechsel im Dezember auf den neuen Datensatz anpassen. |
 | `GTFS_CACHE_FILE` | `data/gtfs.zip` | Ablage des heruntergeladenen Fahrplans |
-| `GTFS_MAX_AGE_HOURS` | `24` | Danach wird der Fahrplan neu heruntergeladen |
+| `GTFS_MAX_AGE_HOURS` | `6` | So oft wird geprüft, ob der Permalink auf eine neue Fahrplan-Version zeigt; nur dann wird neu geladen |
+| `GTFS_EXTRACT_DIR` | `data/gtfs-rail` | Auszug nur mit Bahnfahrten, einmal pro Fahrplan-Version erstellt |
 | `GTFS_RT_URL` | `https://api.opentransportdata.swiss/la/gtfs-rt` | GTFS-RT-Endpunkt |
 | `GTFS_RT_API_KEY` | – | API-Key für GTFS-RT |
 | `GTFS_RT_ENABLED` | – | `1` = GTFS-RT auch ohne `GTFS_RT_API_KEY` abfragen (wenn ein Proxy den `Authorization`-Header ergänzt) |

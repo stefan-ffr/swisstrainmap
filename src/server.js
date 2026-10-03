@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
 import { openGtfs, ensureDownloaded } from './gtfs-source.js';
 import { loadGtfs } from './gtfs-loader.js';
+import { ensureRailExtract } from './gtfs-extract.js';
 import { Timetable } from './timetable.js';
 import { RealtimeStore } from './realtime.js';
 import { todayKey } from './time.js';
@@ -38,7 +39,8 @@ async function reload() {
   try {
     const file = config.gtfsPath
       || await ensureDownloaded(config.gtfsUrl, path.resolve(root, config.gtfsCacheFile), config.gtfsMaxAgeHours, log);
-    const src = await openGtfs(path.resolve(root, file));
+    const extract = await ensureRailExtract(path.resolve(root, file), path.resolve(root, config.gtfsExtractDir), config.routeTypes, log);
+    const src = await openGtfs(extract);
     try {
       const data = await loadGtfs(src, {
         routeTypes: config.routeTypes,
