@@ -21,6 +21,9 @@ const SNAP_MAX = 500;
 // Max. Richtungsänderung pro Knoten. Schlägt die strenge Suche fehl (z. B. wegen
 // ungenau gezeichneter Weichen in OSM), wird eine lockerere Grenze versucht.
 const TURN_LIMITS = [70, 110].map((deg) => Math.cos((deg * Math.PI) / 180));
+// Weg vom Haltepunkt zum Gleis zählt mehrfach, damit der Zug am Bahnhof startet
+// und nicht am Gleispunkt, der dem Ziel schon am nächsten liegt.
+const SNAP_WEIGHT = 3;
 const CELL = 0.003;           // Grad, Rasterweite des räumlichen Index
 
 /**
@@ -192,7 +195,7 @@ export class RailNetwork {
 
   search(a, b, minCos) {
     const starts = this.near(a[0], a[1]);
-    const targets = new Map(this.near(b[0], b[1]).map(([v, d]) => [v, d]));
+    const targets = new Map(this.near(b[0], b[1]).map(([v, d]) => [v, d * SNAP_WEIGHT]));
     if (!starts.length || !targets.size) return null;
 
     const { x, y, offset, src, dst, len, g, prev, closed, E } = this;
@@ -212,7 +215,7 @@ export class RailNetwork {
       heap.push(cost + h(dst[e]), e);
     };
     for (const [s, d] of starts) {
-      for (let e = offset[s]; e < offset[s + 1]; e++) relax(e, d + len[e], -1);
+      for (let e = offset[s]; e < offset[s + 1]; e++) relax(e, d * SNAP_WEIGHT + len[e], -1);
     }
 
     while (heap.size) {
