@@ -66,11 +66,12 @@ export class RealtimeStore {
    * wird gewartet, und der letzte Feed wird in cacheFile gespeichert, damit ein
    * Neustart weder ohne Daten dasteht noch das Limit sofort wieder anfragt.
    */
-  async start({ url, apiKey, intervalSeconds, cacheFile, log = console.log }) {
-    if (!apiKey) {
+  async start({ url, apiKey, enabled = false, intervalSeconds, cacheFile, log = console.log }) {
+    if (!apiKey && !enabled) {
       log('GTFS-RT: kein API-Key (GTFS_RT_API_KEY) – Karte zeigt Sollpositionen nach Fahrplan.');
       return;
     }
+    if (!apiKey) log('GTFS-RT: ohne eigenen Key (GTFS_RT_ENABLED) – Authentisierung muss z. B. ein Proxy ergänzen.');
     this.status.enabled = true;
     const interval = Math.max(MIN_INTERVAL, intervalSeconds) * 1000;
 
@@ -88,9 +89,15 @@ export class RealtimeStore {
     const poll = async () => {
       let next = interval;
       try {
-        const res = await fetch(url, {
-          headers: { Authorization: `Bearer ${apiKey}`, 'Accept-Encoding': 'gzip, deflate' },
-        });
+        // Die API leitet auf eine signierte Download-URL (largeapi…) weiter;
+        // fetch folgt automatisch und lässt dabei den Authorization-Header weg.
+        const headers = { 'Accept-Encoding': 'gzip, deflate' };
+        if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+        const res = await fetch(url, { headers });
+        if (res.status === 401 || res.status === 403) {
+          next = Math.max(interval, 300_000);
+          throw new Error(`${res.status} – API-Key fehlt oder ist ungültig, nächster Versuch in 5 min`);
+        }
         if (res.status === 429) {
           next = Math.max(interval, (Number(res.headers.get('retry-after')) || 60) * 1000);
           throw new Error(`429 Rate-Limit – nächster Versuch in ${Math.round(next / 1000)} s`);

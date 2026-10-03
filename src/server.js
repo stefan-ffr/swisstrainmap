@@ -157,6 +157,7 @@ server.listen(config.port, config.host, () => log(`Server läuft auf http://loca
 realtime.start({
   url: config.rtUrl,
   apiKey: config.rtApiKey,
+  enabled: config.rtEnabled,
   intervalSeconds: config.rtIntervalSeconds,
   cacheFile: path.resolve(root, config.rtCacheFile),
   log,
