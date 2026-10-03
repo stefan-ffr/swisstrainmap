@@ -21,25 +21,40 @@ const SNAP_MAX = 30;          // so viele nächste Gleispunkte als Kandidaten
 const TURN_LIMITS = [70, 110].map((deg) => Math.cos((deg * Math.PI) / 180));
 const CELL = 0.003;           // Grad, Rasterweite des räumlichen Index
 
-/** Lädt das Gleisnetz per Overpass, falls kein aktueller Cache existiert. */
-export async function ensureRailOsm(url, cacheFile, maxAgeDays, log = console.log) {
+/**
+ * Lädt das Gleisnetz per Overpass, falls kein aktueller Cache existiert.
+ * Die Server in urls werden der Reihe nach versucht.
+ */
+export async function ensureRailOsm(urls, cacheFile, maxAgeDays, log = console.log) {
   try {
     const stat = await fsp.stat(cacheFile);
     if ((Date.now() - stat.mtimeMs) / 86400e3 < maxAgeDays) return cacheFile;
   } catch { /* noch kein Cache */ }
-  log(`Gleisnetz: lade OSM-Daten von ${url} (kann einige Minuten dauern) …`);
   await fsp.mkdir(path.dirname(cacheFile), { recursive: true });
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ data: OVERPASS_QUERY }),
-  });
-  if (!res.ok) throw new Error(`Overpass: ${res.status} ${res.statusText}`);
-  const tmp = `${cacheFile}.part`;
-  await pipeline(Readable.fromWeb(res.body), fs.createWriteStream(tmp));
-  await fsp.rename(tmp, cacheFile);
-  log(`Gleisnetz: gespeichert unter ${cacheFile}`);
-  return cacheFile;
+  const errors = [];
+  for (const url of urls) {
+    try {
+      log(`Gleisnetz: lade OSM-Daten von ${url} …`);
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ data: OVERPASS_QUERY }),
+      });
+      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+      const tmp = `${cacheFile}.part`;
+      await pipeline(Readable.fromWeb(res.body), fs.createWriteStream(tmp));
+      // Overpass meldet Abbrüche (Timeout, Speicher) im JSON statt per Statuscode
+      const tail = (await fsp.readFile(tmp, 'utf8')).slice(-2000);
+      if (/"remark"\s*:\s*"runtime error/.test(tail)) throw new Error('Overpass-Abfrage abgebrochen (runtime error)');
+      await fsp.rename(tmp, cacheFile);
+      log(`Gleisnetz: gespeichert unter ${cacheFile}`);
+      return cacheFile;
+    } catch (err) {
+      errors.push(`${url}: ${err.message}`);
+      log(`Gleisnetz: ${url} fehlgeschlagen – ${err.message}`);
+    }
+  }
+  throw new Error(`Gleisnetz-Download fehlgeschlagen (${errors.join('; ')})`);
 }
 
 class Heap {

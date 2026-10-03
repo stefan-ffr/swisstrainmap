@@ -27,7 +27,7 @@ async function computeLegs() {
   await legStore.computeMissing(async () => {
     const file = config.railOsmPath
       ? path.resolve(root, config.railOsmPath)
-      : await ensureRailOsm(config.overpassUrl, path.resolve(root, config.railOsmCacheFile), config.railOsmMaxAgeDays, log);
+      : await ensureRailOsm(config.overpassUrls, path.resolve(root, config.railOsmCacheFile), config.railOsmMaxAgeDays, log);
     return loadRailNetwork(file, log);
   });
 }
@@ -42,6 +42,7 @@ async function reload() {
     try {
       const data = await loadGtfs(src, {
         routeTypes: config.routeTypes,
+        bbox: config.bbox,
         centerDay: todayKey(Date.now(), config.timeZone),
         log,
       });

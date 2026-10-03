@@ -40,7 +40,7 @@ async function loadServices(src, days) {
  * @param src     Ergebnis von openGtfs()
  * @param options { routeTypes:Set<number>, centerDay:number (YYYYMMDD), log }
  */
-export async function loadGtfs(src, { routeTypes, centerDay, log = console.log }) {
+export async function loadGtfs(src, { routeTypes, centerDay, bbox = null, log = console.log }) {
   const t0 = Date.now();
   const days = [addDays(centerDay, -1), centerDay, addDays(centerDay, 1)];
   const services = await loadServices(src, days);
@@ -117,10 +117,15 @@ export async function loadGtfs(src, { routeTypes, centerDay, log = console.log }
     stops.parent.push(s.parent || id);
   }
 
+  // Der Schweizer Feed enthält auch Züge, die nie in die Schweiz fahren
+  // (z. B. SNCF Paris–Lyon): nur Fahrten mit mindestens einem Halt in bbox behalten.
+  const inBox = (k) => !bbox || (stops.lat[k] >= bbox[0] && stops.lon[k] >= bbox[1] && stops.lat[k] <= bbox[2] && stops.lon[k] <= bbox[3]);
+  let outside = 0;
   for (const [id, trip] of trips) {
     const raw = trip.raw.filter((x) => stopIndex.has(x[1])).sort((a, b) => a[0] - b[0]);
     delete trip.raw;
     if (raw.length < 2) { trips.delete(id); continue; }
+    if (!raw.some((x) => inBox(stopIndex.get(x[1])))) { trips.delete(id); outside++; continue; }
     const n = raw.length;
     trip.seq = new Int32Array(n);
     trip.stop = new Int32Array(n);
@@ -136,7 +141,7 @@ export async function loadGtfs(src, { routeTypes, centerDay, log = console.log }
     fillMissingTimes(trip);
   }
 
-  log(`GTFS: ${routes.size} Bahnlinien, ${trips.size} Fahrten, ${stops.id.length} Halte `
+  log(`GTFS: ${routes.size} Bahnlinien, ${trips.size} Fahrten (${outside} ausserhalb ignoriert), ${stops.id.length} Halte `
     + `(${rows.toLocaleString('de-CH')} stop_times gelesen) in ${((Date.now() - t0) / 1000).toFixed(1)} s`);
 
   return { days, services, routes, trips, stops, stopIndex };

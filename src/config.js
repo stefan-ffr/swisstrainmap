@@ -31,10 +31,15 @@ export const config = {
   railRouting: env.RAIL_ROUTING !== '0',
   // Lokale Overpass-JSON-Datei; sonst Download über Overpass mit Cache.
   railOsmPath: env.RAIL_OSM_PATH || '',
-  overpassUrl: env.OVERPASS_URL || 'https://overpass-api.de/api/interpreter',
+  // Mehrere Overpass-Server (kommagetrennt) werden der Reihe nach versucht;
+  // overpass.osm.ch ist die Instanz der Swiss OSM Association.
+  overpassUrls: list(env.OVERPASS_URL || 'https://overpass.osm.ch/api/interpreter,https://overpass-api.de/api/interpreter'),
   railOsmCacheFile: env.RAIL_OSM_CACHE_FILE || 'data/rail-osm.json',
   railOsmMaxAgeDays: Number(env.RAIL_OSM_MAX_AGE_DAYS || 30),
   railLegsCacheFile: env.RAIL_LEGS_CACHE_FILE || 'data/rail-legs.json',
+
+  // Fahrten ohne Halt in diesem Gebiet (Süd, West, Nord, Ost) werden ignoriert.
+  bbox: list(env.BBOX || '45.75,5.85,47.85,10.55').map(Number),
 
   timeZone: env.TZ_FEED || 'Europe/Zurich',
 };

@@ -77,7 +77,8 @@ Fahrplan und Prognose.
 | `GTFS_RT_CACHE_FILE` | `data/gtfs-rt.pb` | Letzter GTFS-RT-Feed (für Neustarts) |
 | `RAIL_ROUTING` | `1` | `0` = Gleisnetz nicht verwenden (Luftlinie) |
 | `RAIL_OSM_PATH` | – | Lokale Overpass-JSON-Datei mit dem Gleisnetz (statt Download) |
-| `OVERPASS_URL` | `https://overpass-api.de/api/interpreter` | Overpass-Endpunkt für den Download |
+| `OVERPASS_URL` | `https://overpass.osm.ch/api/interpreter,https://overpass-api.de/api/interpreter` | Overpass-Server (kommagetrennt, der Reihe nach versucht) |
+| `BBOX` | `45.75,5.85,47.85,10.55` | Fahrten ohne Halt in diesem Gebiet werden ignoriert (der Feed enthält z. B. auch SNCF-Züge Paris–Lyon) |
 | `RAIL_OSM_CACHE_FILE` | `data/rail-osm.json` | Ablage des heruntergeladenen Gleisnetzes |
 | `RAIL_OSM_MAX_AGE_DAYS` | `30` | Danach wird das Gleisnetz neu geladen (nur falls Abschnitte fehlen) |
 | `RAIL_LEGS_CACHE_FILE` | `data/rail-legs.json` | Berechnete Streckenabschnitte |
