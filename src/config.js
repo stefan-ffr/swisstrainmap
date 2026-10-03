@@ -19,8 +19,10 @@ export const config = {
   // GTFS-RT (Trip Updates). Ohne API-Key läuft die Karte rein nach Fahrplan.
   rtUrl: env.GTFS_RT_URL || 'https://api.opentransportdata.swiss/la/gtfs-rt',
   rtApiKey: env.GTFS_RT_API_KEY || '',
-  // opentransportdata.swiss erlaubt nur wenige Abfragen pro Minute.
-  rtIntervalSeconds: Number(env.GTFS_RT_INTERVAL || 30),
+  // opentransportdata.swiss erlaubt nur 2 Abfragen pro Minute (Minimum 30 s);
+  // der Standard lässt etwas Reserve.
+  rtIntervalSeconds: Number(env.GTFS_RT_INTERVAL || 35),
+  rtCacheFile: env.GTFS_RT_CACHE_FILE || 'data/gtfs-rt.pb',
 
   // GTFS route_type, die als "Zug" gelten (2 = Rail, 100–117 = Extended Rail).
   routeTypes: new Set(list(env.ROUTE_TYPES || '2,100,101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117').map(Number)),

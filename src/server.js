@@ -125,5 +125,11 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(config.port, config.host, () => log(`Server läuft auf http://localhost:${config.port}`));
-realtime.start({ url: config.rtUrl, apiKey: config.rtApiKey, intervalSeconds: config.rtIntervalSeconds, log });
+realtime.start({
+  url: config.rtUrl,
+  apiKey: config.rtApiKey,
+  intervalSeconds: config.rtIntervalSeconds,
+  cacheFile: path.resolve(root, config.rtCacheFile),
+  log,
+});
 reload();

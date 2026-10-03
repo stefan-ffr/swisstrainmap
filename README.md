@@ -13,7 +13,7 @@ bekannten Zugradar-Karten – **berechnet**:
 
 1. Beim Start liest der Server den GTFS-Fahrplan ein (nur Bahn-`route_type`s 2 und 100–117 und nur Fahrten
    von gestern/heute/morgen, damit der Speicher klein bleibt). Bei Tageswechsel wird neu geladen.
-2. Alle 30 s holt er GTFS-RT Trip Updates und rechnet die Verspätungen auf die Halte der Fahrt um
+2. Alle 35 s holt er GTFS-RT Trip Updates und rechnet die Verspätungen auf die Halte der Fahrt um
    (Verspätungen werden auf nachfolgende Halte übertragen, ausgefallene Fahrten ausgeblendet).
 3. `/api/trains` liefert für jeden fahrenden Zug den aktuellen Halt plus die nächsten Wegpunkte mit
    (erwarteten) Ankunfts-/Abfahrtszeiten.
@@ -44,8 +44,14 @@ docker run -p 8080:8080 -v "$(pwd)/data:/app/data" -e GTFS_RT_API_KEY=<dein-key>
 
 Für die Echtzeitdaten braucht es einen (kostenlosen) Key von
 [opentransportdata.swiss](https://opentransportdata.swiss) für die API *GTFS-RT*. Ohne Key läuft die Karte
-rein nach Fahrplan. Der Key wird als `Authorization: Bearer <key>` gesendet. Die API ist stark limitiert
-(wenige Abfragen pro Minute) – daher `GTFS_RT_INTERVAL` nicht zu klein wählen.
+rein nach Fahrplan. Der Key wird als `Authorization: Bearer <key>` gesendet. Die API erlaubt nur
+**2 Abfragen pro Minute**. Der Server fragt deshalb höchstens alle 30 s ab (Standard 35 s), wartet bei
+HTTP 429 und speichert den letzten Feed in `data/gtfs-rt.pb`, damit ein Neustart sofort Daten hat und das
+Limit nicht verletzt. Die Browser greifen nie selbst auf die API zu – egal wie viele Leute die Karte offen
+haben, es bleibt bei einer Abfrage alle 35 s.
+
+Hinweis: GPS-Positionen der Züge werden nicht veröffentlicht; die Karte schätzt die Position immer aus
+Fahrplan und Prognose.
 
 ## Konfiguration
 
@@ -58,7 +64,8 @@ rein nach Fahrplan. Der Key wird als `Authorization: Bearer <key>` gesendet. Die
 | `GTFS_MAX_AGE_HOURS` | `24` | Danach wird der Fahrplan neu heruntergeladen |
 | `GTFS_RT_URL` | `https://api.opentransportdata.swiss/la/gtfs-rt` | GTFS-RT-Endpunkt |
 | `GTFS_RT_API_KEY` | – | API-Key für GTFS-RT |
-| `GTFS_RT_INTERVAL` | `30` | Abfrageintervall GTFS-RT in Sekunden |
+| `GTFS_RT_INTERVAL` | `35` | Abfrageintervall GTFS-RT in Sekunden (Minimum 30) |
+| `GTFS_RT_CACHE_FILE` | `data/gtfs-rt.pb` | Letzter GTFS-RT-Feed (für Neustarts) |
 | `ROUTE_TYPES` | `2,100,…,117` | GTFS `route_type`s, die als Zug gelten (z. B. zusätzlich `400,900` für Metro/Tram) |
 
 ## API
