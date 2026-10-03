@@ -16,6 +16,19 @@ export function categoryOf(route) {
 /** Ermittelt pro Datum (YYYYMMDD) die aktiven service_ids. */
 async function loadServices(src, days) {
   const active = new Map(days.map((d) => [d, new Set()]));
+  if (src.has('service_days.txt')) {
+    // kompaktes Format aus dem Bahn-Auszug (siehe gtfs-extract.js)
+    const dayNumber = (key) => Date.UTC(Math.floor(key / 10000), Math.floor(key / 100) % 100 - 1, key % 100) / 86400e3;
+    await readCsv(await src.open('service_days.txt'), (r, i) => {
+      const hex = r[i.days], first = dayNumber(Number(r[i.start_date]));
+      for (const d of days) {
+        const k = dayNumber(d) - first;
+        if (k < 0 || k >= hex.length * 4) continue;
+        if (parseInt(hex.substr((k >> 3) * 2, 2), 16) & (1 << (k & 7))) active.get(d).add(r[i.service_id]);
+      }
+    });
+    return active;
+  }
   if (src.has('calendar.txt')) {
     await readCsv(await src.open('calendar.txt'), (r, i) => {
       const start = Number(r[i.start_date]), end = Number(r[i.end_date]);
