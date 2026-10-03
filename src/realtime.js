@@ -7,8 +7,8 @@ const { FeedMessage, TripUpdate, TripDescriptor } = GtfsRealtimeBindings.transit
 const CANCELED = TripDescriptor.ScheduleRelationship.CANCELED;
 const SKIPPED = TripUpdate.StopTimeUpdate.ScheduleRelationship.SKIPPED;
 
-// opentransportdata.swiss: max. 2 Abfragen pro Minute.
-const MIN_INTERVAL = 30;
+// opentransportdata.swiss: je nach Plan 2–5 Abfragen pro Minute; 5/min = alle 12 s.
+const MIN_INTERVAL = 12;
 
 const num = (v) => (v === null || v === undefined ? undefined : Number(v));
 
@@ -62,7 +62,7 @@ export class RealtimeStore {
 
   /**
    * Fragt den Feed periodisch ab. opentransportdata.swiss erlaubt nur
-   * 2 Abfragen pro Minute: Abfragen laufen deshalb nie überlappend, bei 429
+   * wenige Abfragen pro Minute (je nach Plan 2–5): Abfragen laufen deshalb nie überlappend, bei 429
    * wird gewartet, und der letzte Feed wird in cacheFile gespeichert, damit ein
    * Neustart weder ohne Daten dasteht noch das Limit sofort wieder anfragt.
    */

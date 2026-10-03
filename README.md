@@ -53,8 +53,10 @@ docker run -p 8080:8080 -v "$(pwd)/data:/app/data" -e GTFS_RT_API_KEY=<dein-key>
 
 Für die Echtzeitdaten braucht es einen (kostenlosen) Key von
 [opentransportdata.swiss](https://opentransportdata.swiss) für die API *GTFS-RT*. Ohne Key läuft die Karte
-rein nach Fahrplan. Der Key wird als `Authorization: Bearer <key>` gesendet. Die API erlaubt nur
-**2 Abfragen pro Minute**. Der Server fragt deshalb höchstens alle 30 s ab (Standard 35 s), wartet bei
+rein nach Fahrplan. Den Key gibt es im [API-Manager](https://api-manager.opentransportdata.swiss) (Produkt *GTFS-RT*, App anlegen,
+Redirect-URLs leer lassen). Er wird als `Authorization: Bearer <key>` gesendet. Die API erlaubt nur
+je nach Plan nur **2–5 Abfragen pro Minute** (aktueller GTFS-RT-Plan: 5/min). Der Server fragt standardmässig
+alle 35 s ab (mit `GTFS_RT_INTERVAL` bis minimal 12 s), wartet bei
 HTTP 429 und speichert den letzten Feed in `data/gtfs-rt.pb`, damit ein Neustart sofort Daten hat und das
 Limit nicht verletzt. Die Browser greifen nie selbst auf die API zu – egal wie viele Leute die Karte offen
 haben, es bleibt bei einer Abfrage alle 35 s.
@@ -73,7 +75,7 @@ Fahrplan und Prognose.
 | `GTFS_MAX_AGE_HOURS` | `24` | Danach wird der Fahrplan neu heruntergeladen |
 | `GTFS_RT_URL` | `https://api.opentransportdata.swiss/la/gtfs-rt` | GTFS-RT-Endpunkt |
 | `GTFS_RT_API_KEY` | – | API-Key für GTFS-RT |
-| `GTFS_RT_INTERVAL` | `35` | Abfrageintervall GTFS-RT in Sekunden (Minimum 30) |
+| `GTFS_RT_INTERVAL` | `35` | Abfrageintervall GTFS-RT in Sekunden (Minimum 12; beim Plan mit 5 Abfragen/min z. B. `15`) |
 | `GTFS_RT_CACHE_FILE` | `data/gtfs-rt.pb` | Letzter GTFS-RT-Feed (für Neustarts) |
 | `RAIL_ROUTING` | `1` | `0` = Gleisnetz nicht verwenden (Luftlinie) |
 | `RAIL_OSM_PATH` | – | Lokale Overpass-JSON-Datei mit dem Gleisnetz (statt Download) |

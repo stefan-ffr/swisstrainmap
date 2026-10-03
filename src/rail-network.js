@@ -15,7 +15,9 @@ out body qt; >; out skel qt;`;
 
 const SNAP_RADIUS = 300;      // m: Gleise im Umkreis eines Halts als Start/Ziel
 const SNAP_FALLBACK = 2000;   // m: falls im Umkreis nichts liegt
-const SNAP_MAX = 30;          // so viele nächste Gleispunkte als Kandidaten
+// Alle Gleispunkte im Umkreis: in Bahnhöfen mit mehreren Bahnen (z. B. Montreux:
+// SBB + MOB) lägen sonst die nächsten Kandidaten alle auf der falschen Bahn.
+const SNAP_MAX = 500;
 // Max. Richtungsänderung pro Knoten. Schlägt die strenge Suche fehl (z. B. wegen
 // ungenau gezeichneter Weichen in OSM), wird eine lockerere Grenze versucht.
 const TURN_LIMITS = [70, 110].map((deg) => Math.cos((deg * Math.PI) / 180));

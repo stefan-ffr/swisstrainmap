@@ -19,8 +19,8 @@ export const config = {
   // GTFS-RT (Trip Updates). Ohne API-Key läuft die Karte rein nach Fahrplan.
   rtUrl: env.GTFS_RT_URL || 'https://api.opentransportdata.swiss/la/gtfs-rt',
   rtApiKey: env.GTFS_RT_API_KEY || '',
-  // opentransportdata.swiss erlaubt nur 2 Abfragen pro Minute (Minimum 30 s);
-  // der Standard lässt etwas Reserve.
+  // opentransportdata.swiss erlaubt je nach Plan 2–5 Abfragen pro Minute;
+  // 35 s passt mit Reserve zu beiden (Minimum 12 s).
   rtIntervalSeconds: Number(env.GTFS_RT_INTERVAL || 35),
   rtCacheFile: env.GTFS_RT_CACHE_FILE || 'data/gtfs-rt.pb',
 
