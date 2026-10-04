@@ -171,7 +171,7 @@ function matches(t) {
   if (!modeActive(t.mode || 'rail')) return false;
   if ((t.mode || 'rail') === 'rail' && hiddenCats.has(t.cat)) return false;
   if (!query) return true;
-  return [t.name, t.num, label(t), t.to, t.next, t.at, t.op].some((s) => s && String(s).toLowerCase().includes(query));
+  return [t.name, t.num, label(t), t.to, t.next, t.at, t.op, t.extra && 'extrafahrt'].some((s) => s && String(s).toLowerCase().includes(query));
 }
 
 // --- Daten laden ------------------------------------------------------------
@@ -364,7 +364,7 @@ async function showDetails(id, fit) {
     const cur = live && (live.at === s.name || (!live.at && live.next === s.name));
     const cell = (plan, rt) => {
       if (plan == null) return '';
-      const d = rt - plan;
+      const d = (rt - plan) / 1000; // Zeiten in ms, Verspätung in s
       const extra = trip.rt && Math.abs(d) >= 60 ? ` <span class="${delayClass(d)}">${delayText(d)}</span>` : '';
       return fmtTime(plan) + extra;
     };
@@ -376,13 +376,64 @@ async function showDetails(id, fit) {
   $('details').innerHTML = `
     <button class="close" title="Schliessen">✕</button>
     <h2 style="color:${colorFor(trip)}">${esc(trip.name)} ${esc(trip.num || '')} → ${esc(trip.to || trip.stops.at(-1).name)}</h2>
-    <div class="sub">${esc(trip.op)}${trip.op ? ' · ' : ''}${where}${delay}${trip.canceled ? ' · <b class="delay-bad">fällt aus</b>' : ''}${trip.rt ? '' : ' · nur Fahrplan'}</div>
+    <div class="sub">${trip.extra ? '<b>Extrafahrt</b> (nicht im Fahrplan) · ' : ''}${esc(trip.op)}${trip.op ? ' · ' : ''}${where}${delay}${trip.canceled ? ' · <b class="delay-bad">fällt aus</b>' : ''}${trip.rt ? '' : ' · nur Fahrplan'}</div>
     <table><tr><td></td><td class="t">an</td><td class="t">ab</td></tr>${rows}</table>`;
   $('details').hidden = false;
   $('details').querySelector('.close').onclick = closeDetails;
 }
 
 map.on('click', () => { if (selectedId) closeDetails(); });
+
+// --- Extrafahrten (auch bereits beendete) ------------------------------------
+
+function stopRows(stops, t, rtKnown) {
+  return stops.map((s) => {
+    const passed = (s.depRt ?? s.arrRt) < t;
+    const cell = (plan, rt) => {
+      if (plan == null) return '';
+      const d = (rt - plan) / 1000;
+      const extra = rtKnown && Math.abs(d) >= 60 ? ` <span class="${delayClass(d)}">${delayText(d)}</span>` : '';
+      return fmtTime(plan) + extra;
+    };
+    return `<tr class="${passed ? 'past' : ''}"><td>${esc(s.name)}</td><td class="t">${cell(s.arr, s.arrRt)}</td><td class="t">${cell(s.dep, s.depRt)}</td></tr>`;
+  }).join('');
+}
+
+async function showExtras() {
+  selectedId = null;
+  routeLayer.clearLayers();
+  const res = await fetch('api/extras');
+  const { extras } = await res.json();
+  const box = $('details');
+  const items = extras.map((e, i) => {
+    const live = trains.has(`${e.tripId}|${e.day}`);
+    return `<li data-i="${i}"><span class="t">${fmtTime(e.dep)}</span><span>${esc(e.name)} ${esc(e.num || '')} ${esc(e.from)} → ${esc(e.to)}</span>${live ? '<span class="live">unterwegs</span>' : `<span class="t">${e.delay >= 60 ? `<span class="${delayClass(e.delay)}">${delayText(e.delay)}</span>` : ''}</span>`}</li>`;
+  }).join('');
+  box.innerHTML = `
+    <button class="close" title="Schliessen">✕</button>
+    <h2>Extrafahrten heute</h2>
+    <div class="sub">${extras.length} Fahrten, die nicht im Fahrplan stehen (Extrazüge, Ersatzbusse, Verstärkungskurse) – auch bereits beendete.</div>
+    ${extras.length ? `<ul class="extras">${items}</ul>` : '<p class="sub">Heute noch keine.</p>'}`;
+  box.hidden = false;
+  box.querySelector('.close').onclick = closeDetails;
+  box.querySelector('.extras')?.addEventListener('click', (ev) => {
+    const e = extras[ev.target.closest('li')?.dataset.i];
+    if (!e) return;
+    const id = `${e.tripId}|${e.day}`;
+    if (trains.has(id)) { select(id); return; }
+    // beendet: gespeicherte Halte anzeigen
+    box.innerHTML = `
+      <button class="close" title="Schliessen">✕</button>
+      <h2 style="color:${colorFor(e)}">${esc(e.name)} ${esc(e.num || '')} → ${esc(e.to)}</h2>
+      <div class="sub"><b>Extrafahrt</b> · ${esc(e.op)}${e.op ? ' · ' : ''}nicht mehr unterwegs · zuletzt gesehen ${fmtTime(e.lastSeen)}</div>
+      <table><tr><td></td><td class="t">an</td><td class="t">ab</td></tr>${stopRows(e.stops, now(), true)}</table>
+      <button class="link-btn" id="extras-back" type="button">← alle Extrafahrten</button>`;
+    box.querySelector('.close').onclick = closeDetails;
+    $('extras-back').onclick = showExtras;
+  });
+}
+
+$('extras-btn').addEventListener('click', showExtras);
 
 // --- Start ------------------------------------------------------------------
 

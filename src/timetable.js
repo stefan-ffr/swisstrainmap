@@ -17,6 +17,9 @@ export class Timetable {
   constructor(data, timeZone, legStore = null) {
     this.data = data;
     this.timeZone = timeZone;
+    this.legStore = legStore;
+    this.added = new Map(); // tripId -> Zusatzfahrt aus GTFS-RT
+    this.addedVersion = -1;
     if (legStore) {
       // jedem Abschnitt Halt k -> k+1 eine Leg-ID (Streckengeometrie) zuordnen
       const { lat, lon } = data.stops;
@@ -41,6 +44,13 @@ export class Timetable {
       }
       return { day, start: serviceDayStart(day, timeZone), active, byMode };
     });
+
+    // Halte, die von Zügen bedient werden – um bei Zusatzfahrten ohne bekannte
+    // Linie zu entscheiden, ob es ein Zug oder ein (Ersatz-)Bus ist.
+    this.railStops = new Set();
+    for (const trip of data.trips.values()) {
+      if ((trip.route.mode ?? 'rail') === 'rail') for (const s of trip.stop) this.railStops.add(s);
+    }
 
     // Räumlicher Index: Rasterzellen, die eine Fahrt zwischen zwei Halten
     // berührt -> Fahrten. Damit werden für einen Kartenausschnitt nur die
@@ -101,6 +111,82 @@ export class Timetable {
         }
       }
     }
+    for (const trip of this.added.values()) {
+      if (modes && !modes.has(trip.route.mode)) continue;
+      const t = (nowMs - trip.dayStart) / 1000;
+      if (trip.dep[0] <= t && trip.arr[trip.arr.length - 1] + MAX_DELAY >= t) yield { trip, day: trip.day, dayStart: trip.dayStart, t };
+    }
+  }
+
+  /** Index eines Halts in data.stops; unbekannte Halte werden aus allStops ergänzt. */
+  resolveStop(stopId) {
+    const { stops, stopIndex, allStops } = this.data;
+    let k = stopIndex.get(stopId);
+    if (k !== undefined) return k;
+    const a = allStops?.index.get(stopId);
+    if (a === undefined) return undefined;
+    k = stops.id.length;
+    stopIndex.set(stopId, k);
+    stops.id.push(stopId);
+    stops.name.push(allStops.name[a] || stopId);
+    stops.lat.push(allStops.lat[a]);
+    stops.lon.push(allStops.lon[a]);
+    stops.parent.push(allStops.parent[a] || stopId);
+    return k;
+  }
+
+  /**
+   * Zusatzfahrten aus GTFS-RT (schedule_relationship ADDED) in Fahrten
+   * umwandeln: Extrazüge, Ersatzbusse … – sie stehen nicht im Fahrplan, ihre
+   * Halte und Zeiten kommen nur aus dem Echtzeit-Feed.
+   */
+  refreshAdded(realtime) {
+    if (!realtime?.addedTrips || realtime.version === this.addedVersion) return;
+    this.addedVersion = realtime.version;
+    this.added.clear();
+    for (const a of realtime.addedTrips()) {
+      const d = this.days.find((x) => x.day === a.day);
+      if (!d) continue;
+      const base = d.start / 1000;
+      const rows = [];
+      for (const u of [...a.updates].sort((x, y) => (x.seq ?? 0) - (y.seq ?? 0))) {
+        const k = u.stopId !== undefined ? this.resolveStop(u.stopId) : undefined;
+        const arr = u.arrTime ?? u.depTime, dep = u.depTime ?? u.arrTime;
+        if (k === undefined || arr === undefined) continue;
+        // Plan = Prognose minus Verspätung; die Verspätung wendet expectedTimes wieder an
+        rows.push([u.seq ?? rows.length + 1, k, arr - (u.arrDelay ?? u.depDelay ?? 0) - base, dep - (u.depDelay ?? u.arrDelay ?? 0) - base]);
+      }
+      if (rows.length < 2) continue;
+      const known = this.data.routes.get(a.routeId);
+      const onRail = rows.filter((r) => this.railStops.has(r[1])).length >= rows.length / 2;
+      const route = known ?? {
+        id: a.routeId, shortName: 'EXT', longName: '', desc: '', agency: '', category: 'EXT', mode: onRail ? 'rail' : 'bus',
+      };
+      const n = rows.length;
+      const trip = {
+        id: a.tripId,
+        route,
+        serviceId: null,
+        added: true,
+        day: d.day,
+        dayStart: d.start,
+        headsign: this.data.stops.name[rows[n - 1][1]],
+        shortName: /sjyid:\d+:(\d+)/.exec(a.tripId)?.[1] ?? '',
+        seq: Int32Array.from(rows, (r) => r[0]),
+        stop: Int32Array.from(rows, (r) => r[1]),
+        arr: Int32Array.from(rows, (r) => Math.round(r[2])),
+        dep: Int32Array.from(rows, (r) => Math.round(Math.max(r[2], r[3]))),
+      };
+      const network = this.legStore && NETWORK_OF[route.mode];
+      if (network && this.legStore.networks.has(network)) {
+        const { lat, lon } = this.data.stops;
+        trip.leg = Int32Array.from({ length: n - 1 }, (_, k) => {
+          const p = trip.stop[k], q = trip.stop[k + 1];
+          return this.legStore.idFor([lat[p], lon[p]], [lat[q], lon[q]], network);
+        });
+      }
+      this.added.set(trip.id, trip);
+    }
   }
 
   /**
@@ -158,6 +244,7 @@ export class Timetable {
    * dieser Verkehrsmittel, die den Ausschnitt berühren.
    */
   positions(nowMs, realtime, filter = {}) {
+    this.refreshAdded(realtime);
     const { stops } = this.data;
     const { bbox } = filter;
     const inBox = (p) => !bbox || (p[0] >= bbox[0] && p[0] <= bbox[2] && p[1] >= bbox[1] && p[1] <= bbox[3]);
@@ -189,6 +276,7 @@ export class Timetable {
         name: route.shortName || route.category,
         cat: route.category,
         mode: route.mode ?? 'rail',
+        extra: !!trip.added,
         num: trip.shortName,
         to: trip.headsign || stops.name[trip.stop[n - 1]],
         op: route.agency,
@@ -204,8 +292,9 @@ export class Timetable {
 
   /** Detailinfos zu einer Fahrt (Halteliste und Linienverlauf). */
   trip(key, realtime) {
+    this.refreshAdded(realtime);
     const sep = key.lastIndexOf('|');
-    const trip = this.data.trips.get(key.slice(0, sep));
+    const trip = this.data.trips.get(key.slice(0, sep)) ?? this.added.get(key.slice(0, sep));
     const day = this.days.find((d) => d.day === Number(key.slice(sep + 1)));
     if (!trip || !day) return null;
     const { stops } = this.data;
@@ -228,6 +317,7 @@ export class Timetable {
       name: trip.route.shortName || trip.route.category,
       cat: trip.route.category,
       mode: trip.route.mode ?? 'rail',
+      extra: !!trip.added,
       num: trip.shortName,
       to: trip.headsign,
       op: trip.route.agency,

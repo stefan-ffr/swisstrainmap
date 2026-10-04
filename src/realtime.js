@@ -5,10 +5,14 @@ import GtfsRealtimeBindings from 'gtfs-realtime-bindings';
 
 const { FeedMessage, TripUpdate, TripDescriptor } = GtfsRealtimeBindings.transit_realtime;
 const CANCELED = TripDescriptor.ScheduleRelationship.CANCELED;
+const ADDED = TripDescriptor.ScheduleRelationship.ADDED;
 const SKIPPED = TripUpdate.StopTimeUpdate.ScheduleRelationship.SKIPPED;
 
 // opentransportdata.swiss: je nach Plan 2–5 Abfragen pro Minute; 5/min = alle 12 s.
 const MIN_INTERVAL = 12;
+
+// Fortlaufend über alle Instanzen, damit Zwischenspeicher eine neue Version sicher erkennen.
+let feedVersion = 0;
 
 const num = (v) => (v === null || v === undefined ? undefined : Number(v));
 
@@ -20,6 +24,15 @@ export class RealtimeStore {
 
   get(tripId, day) {
     return this.byKey.get(`${tripId}|${day}`) || this.byKey.get(`${tripId}|*`);
+  }
+
+  /** Zusatzfahrten: [{ tripId, day (YYYYMMDD), routeId, updates }] */
+  *addedTrips() {
+    for (const [key, entry] of this.byKey) {
+      if (!entry.added) continue;
+      const sep = key.lastIndexOf('|');
+      yield { tripId: key.slice(0, sep), day: Number(key.slice(sep + 1)), ...entry };
+    }
   }
 
   has(tripId, day) {
@@ -47,10 +60,14 @@ export class RealtimeStore {
       const date = tu.trip.startDate || '*';
       map.set(`${tu.trip.tripId}|${date}`, {
         canceled: tu.trip.scheduleRelationship === CANCELED,
+        // Zusatzfahrt, die nicht im Fahrplan steht (Extrazug, Ersatzbus …)
+        added: tu.trip.scheduleRelationship === ADDED,
+        routeId: tu.trip.routeId || '',
         updates,
       });
     }
     this.byKey = map;
+    this.version = ++feedVersion;
     this.status.trips = map.size;
     this.status.lastSuccess = new Date().toISOString();
     this.status.lastError = null;
@@ -66,7 +83,7 @@ export class RealtimeStore {
    * wird gewartet, und der letzte Feed wird in cacheFile gespeichert, damit ein
    * Neustart weder ohne Daten dasteht noch das Limit sofort wieder anfragt.
    */
-  async start({ url, apiKey, enabled = false, intervalSeconds, cacheFile, log = console.log }) {
+  async start({ url, apiKey, enabled = false, intervalSeconds, cacheFile, log = console.log, onUpdate = () => {} }) {
     if (!apiKey && !enabled) {
       log('GTFS-RT: kein API-Key (GTFS_RT_API_KEY) – Karte zeigt Sollpositionen nach Fahrplan.');
       return;
@@ -83,6 +100,7 @@ export class RealtimeStore {
         this.status.lastSuccess = stat.mtime.toISOString();
         wait = Math.max(0, stat.mtimeMs + interval - Date.now());
         log(`GTFS-RT: ${this.status.trips} Fahrten aus Cache geladen`);
+        onUpdate();
       } catch { /* kein (gültiger) Cache */ }
     }
 
@@ -105,6 +123,7 @@ export class RealtimeStore {
         if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
         const buffer = Buffer.from(await res.arrayBuffer());
         this.ingestBuffer(buffer);
+        onUpdate();
         if (cacheFile) {
           await fsp.mkdir(path.dirname(cacheFile), { recursive: true });
           await fsp.writeFile(cacheFile, buffer);

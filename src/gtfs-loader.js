@@ -158,7 +158,11 @@ export async function loadGtfs(src, { routeTypes, centerDay, bbox = null, log = 
   log(`GTFS: ${routes.size} Linien, ${trips.size.toLocaleString('de-CH')} Fahrten (${modes}; ${outside} ausserhalb ignoriert), `
     + `${stops.id.length} Halte (${rows.toLocaleString('de-CH')} Haltezeiten gelesen) in ${((Date.now() - t0) / 1000).toFixed(1)} s`);
 
-  return { days, services, routes, trips, stops, stopIndex };
+  // Alle Halte zum Nachschlagen (z. B. für Zusatzfahrten aus GTFS-RT, die an
+  // Halten verkehren, die keine reguläre Fahrt im Fenster benutzt).
+  const allStops = { ...all, index: allIndex };
+
+  return { days, services, routes, trips, stops, stopIndex, allStops };
 }
 
 /** Setzt trip.seq/stop/arr/dep (Int32Array) aus nach stop_sequence sortierten Zeilen. */
