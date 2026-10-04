@@ -171,7 +171,7 @@ function matches(t) {
   if (!modeActive(t.mode || 'rail')) return false;
   if ((t.mode || 'rail') === 'rail' && hiddenCats.has(t.cat)) return false;
   if (!query) return true;
-  return [t.name, t.num, label(t), t.to, t.next, t.at, t.op].some((s) => s && String(s).toLowerCase().includes(query));
+  return [t.name, t.num, label(t), t.to, t.next, t.at, t.op, t.extra && 'extrafahrt'].some((s) => s && String(s).toLowerCase().includes(query));
 }
 
 // --- Daten laden ------------------------------------------------------------
@@ -376,7 +376,7 @@ async function showDetails(id, fit) {
   $('details').innerHTML = `
     <button class="close" title="Schliessen">✕</button>
     <h2 style="color:${colorFor(trip)}">${esc(trip.name)} ${esc(trip.num || '')} → ${esc(trip.to || trip.stops.at(-1).name)}</h2>
-    <div class="sub">${esc(trip.op)}${trip.op ? ' · ' : ''}${where}${delay}${trip.canceled ? ' · <b class="delay-bad">fällt aus</b>' : ''}${trip.rt ? '' : ' · nur Fahrplan'}</div>
+    <div class="sub">${trip.extra ? '<b>Extrafahrt</b> (nicht im Fahrplan) · ' : ''}${esc(trip.op)}${trip.op ? ' · ' : ''}${where}${delay}${trip.canceled ? ' · <b class="delay-bad">fällt aus</b>' : ''}${trip.rt ? '' : ' · nur Fahrplan'}</div>
     <table><tr><td></td><td class="t">an</td><td class="t">ab</td></tr>${rows}</table>`;
   $('details').hidden = false;
   $('details').querySelector('.close').onclick = closeDetails;

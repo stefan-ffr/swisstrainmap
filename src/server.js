@@ -75,6 +75,11 @@ async function reload() {
   computeLegs();
 }
 
+// Neue Abschnitte (z. B. von Extrafahrten aus GTFS-RT) regelmässig nachberechnen;
+// ohne offene Abschnitte wird kein Netz geladen.
+setInterval(() => { if (state.timetable) computeLegs(); }, 30 * 60_000).unref();
+setTimeout(() => { if (state.timetable) computeLegs(); }, 2 * 60_000).unref(); // erste Extrafahrten bald nach dem Start
+
 // Fenster aus gestern/heute/morgen nachführen, sobald ein neuer Tag beginnt.
 setInterval(() => {
   const today = todayKey(Date.now(), config.timeZone);

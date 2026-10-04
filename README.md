@@ -18,6 +18,9 @@ bekannten Zugradar-Karten – **berechnet**:
    jedem Tageswechsel liest er damit gezielt nur die Fahrten von gestern/heute/morgen.
 2. Alle 35 s holt er GTFS-RT Trip Updates und rechnet die Verspätungen auf die Halte der Fahrt um
    (Verspätungen werden auf nachfolgende Halte übertragen, ausgefallene Fahrten ausgeblendet).
+   Zusatzfahrten, die nur im Echtzeit-Feed stehen (kurzfristige Extrazüge, Ersatzbusse, Verstärkungskurse),
+   werden aus den Halten und Zeiten des Feeds aufgebaut und als „Extrafahrt“ angezeigt. Güterzüge sind in
+   keinen offenen Daten enthalten.
 3. Das Gleisnetz der Schweiz wird aus OpenStreetMap geladen (`railway=rail|narrow_gauge|light_rail|funicular`,
    ohne Rangiergleise). Für jedes Paar aufeinanderfolgender Halte sucht der Server per A* den Weg über die
    Gleise – über gerichtete Gleisabschnitte, sodass Züge an Weichen nicht „umkehren“ (max. 70° Richtungsänderung

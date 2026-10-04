@@ -5,10 +5,14 @@ import GtfsRealtimeBindings from 'gtfs-realtime-bindings';
 
 const { FeedMessage, TripUpdate, TripDescriptor } = GtfsRealtimeBindings.transit_realtime;
 const CANCELED = TripDescriptor.ScheduleRelationship.CANCELED;
+const ADDED = TripDescriptor.ScheduleRelationship.ADDED;
 const SKIPPED = TripUpdate.StopTimeUpdate.ScheduleRelationship.SKIPPED;
 
 // opentransportdata.swiss: je nach Plan 2–5 Abfragen pro Minute; 5/min = alle 12 s.
 const MIN_INTERVAL = 12;
+
+// Fortlaufend über alle Instanzen, damit Zwischenspeicher eine neue Version sicher erkennen.
+let feedVersion = 0;
 
 const num = (v) => (v === null || v === undefined ? undefined : Number(v));
 
@@ -20,6 +24,15 @@ export class RealtimeStore {
 
   get(tripId, day) {
     return this.byKey.get(`${tripId}|${day}`) || this.byKey.get(`${tripId}|*`);
+  }
+
+  /** Zusatzfahrten: [{ tripId, day (YYYYMMDD), routeId, updates }] */
+  *addedTrips() {
+    for (const [key, entry] of this.byKey) {
+      if (!entry.added) continue;
+      const sep = key.lastIndexOf('|');
+      yield { tripId: key.slice(0, sep), day: Number(key.slice(sep + 1)), ...entry };
+    }
   }
 
   has(tripId, day) {
@@ -47,10 +60,14 @@ export class RealtimeStore {
       const date = tu.trip.startDate || '*';
       map.set(`${tu.trip.tripId}|${date}`, {
         canceled: tu.trip.scheduleRelationship === CANCELED,
+        // Zusatzfahrt, die nicht im Fahrplan steht (Extrazug, Ersatzbus …)
+        added: tu.trip.scheduleRelationship === ADDED,
+        routeId: tu.trip.routeId || '',
         updates,
       });
     }
     this.byKey = map;
+    this.version = ++feedVersion;
     this.status.trips = map.size;
     this.status.lastSuccess = new Date().toISOString();
     this.status.lastError = null;

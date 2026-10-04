@@ -101,3 +101,32 @@ test('nur Fahrten im Kartenausschnitt werden berechnet', () => {
   // Verkehrsmittel-Filter
   assert.equal(tt.positions(at('05:40'), null, { modes: new Set(['bus']) }).length, 0);
 });
+
+test('Zusatzfahrt aus GTFS-RT (Extrazug) erscheint mit Halten, Zeiten und Verspätung', () => {
+  const rt = new RealtimeStore();
+  const sec = (hhmm) => Math.round(at(hhmm) / 1000);
+  rt.ingestBuffer(feed([{
+    id: 'x',
+    tripUpdate: {
+      trip: { tripId: 'ojp:extra:sjyid:100001:39001-001', startDate: String(DAY), scheduleRelationship: 'ADDED', routeId: 'unbekannt' },
+      stopTimeUpdate: [
+        { stopSequence: 1, stopId: 'ZH', departure: { time: sec('06:02'), delay: 120 } },
+        { stopSequence: 2, stopId: 'ZG', arrival: { time: sec('06:26'), delay: 120 }, departure: { time: sec('06:27'), delay: 120 } },
+        { stopSequence: 3, stopId: 'LZ', arrival: { time: sec('06:48'), delay: 120 } },
+      ],
+    },
+  }]));
+  const extra = tt.positions(at('06:10'), rt).find((t) => t.extra);
+  assert.ok(extra, 'Extrazug unterwegs');
+  assert.equal(extra.num, '39001');
+  assert.equal(extra.to, 'Luzern');
+  assert.equal(extra.next, 'Zug');
+  assert.equal(extra.delay, 120);
+  assert.equal(extra.mode, 'rail'); // Halte werden von Zügen bedient
+  const detail = tt.trip(extra.id, rt);
+  assert.deepEqual(detail.stops.map((s) => s.name), ['Zürich HB', 'Zug', 'Luzern']);
+  assert.equal(detail.stops[0].dep, at('06:00')); // Plan = Prognose - Verspätung
+  assert.equal(detail.stops[0].depRt, at('06:02'));
+  // vor der Abfahrt nicht sichtbar
+  assert.equal(tt.positions(at('05:59'), rt).find((t) => t.extra), undefined);
+});
