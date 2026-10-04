@@ -29,8 +29,10 @@ bekannten Zugradar-Karten – **berechnet**:
    Jeder Wegpunkt trägt die ID des folgenden Streckenabschnitts.
 5. Züge zeigt die Karte immer; die übrigen Verkehrsmittel erst ab einer Zoomstufe (Schiffe ab 10, Metro und
    Bergbahnen ab 11, Trams ab 12, Busse ab 13) und nur für den sichtbaren Ausschnitt (`/api/trains?modes=…&bbox=…`).
-   Trams, Metro und Standseilbahnen fahren wie Züge auf den OSM-Gleisen, Busse, Schiffe und Luftseilbahnen auf
-   der Luftlinie zwischen den Halten.
+   Trams, Metro und Standseilbahnen fahren wie Züge auf den OSM-Gleisen. Busse fahren auf den Strassen, die in
+   OSM als Buslinien (`route=bus`/`trolleybus`) eingetragen sind – Einbahnstrassen werden beachtet (ausser mit
+   Busausnahme), rechtwinkliges Abbiegen ist erlaubt, Wenden nicht. Schiffe und Luftseilbahnen fahren in
+   Luftlinie zwischen den Halten.
 6. Der Browser holt die Geometrie der Abschnitte einmalig (`/api/legs`), interpoliert die Position entlang der
    Gleise und animiert die Züge flüssig; neue Positionsdaten alle 10 s.
 
@@ -127,7 +129,10 @@ Fahrplan und Prognose.
 | `BBOX` | `45.75,5.85,47.85,10.55` | Fahrten ohne Halt in diesem Gebiet werden ignoriert (der Feed enthält z. B. auch SNCF-Züge Paris–Lyon) |
 | `RAIL_OSM_CACHE_FILE` | `data/rail-osm.json` | Ablage des heruntergeladenen Gleisnetzes |
 | `RAIL_OSM_MAX_AGE_DAYS` | `30` | Danach wird das Gleisnetz neu geladen (nur falls Abschnitte fehlen) |
-| `RAIL_LEGS_CACHE_FILE` | `data/rail-legs.json` | Berechnete Streckenabschnitte |
+| `RAIL_LEGS_CACHE_FILE` | `data/rail-legs.json` | Berechnete Streckenabschnitte (Gleise und Busstrassen) |
+| `ROAD_ROUTING` | `1` | `0` = Busse in Luftlinie statt auf den Strassen der OSM-Buslinien |
+| `ROAD_OSM_PATH` | – | Lokale Overpass-JSON-Datei mit dem Busnetz (statt Download) |
+| `ROAD_OSM_CACHE_FILE` | `data/road-osm.json` | Ablage des heruntergeladenen Busnetzes (~190 MB) |
 
 ## API
 

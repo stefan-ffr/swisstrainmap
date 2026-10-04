@@ -2,8 +2,10 @@
 
 export const ALL_MODES = ['rail', 'tram', 'metro', 'bus', 'ship', 'cable', 'funicular'];
 
-// Diese Verkehrsmittel fahren auf Schienen und werden auf dem OSM-Gleisnetz geroutet.
-export const ROUTED_MODES = new Set(['rail', 'tram', 'metro', 'funicular']);
+// Netz, auf dem ein Verkehrsmittel zwischen den Halten geroutet wird
+// (Profile in rail-network.js); Schiffe und Luftseilbahnen: Luftlinie.
+export const NETWORK_OF = { rail: 'rail', tram: 'rail', metro: 'rail', funicular: 'rail', bus: 'road' };
+export const ROUTED_MODES = new Set(Object.keys(NETWORK_OF));
 
 export function modeOf(type) {
   if (type === 2 || (type >= 100 && type < 200)) return 'rail';

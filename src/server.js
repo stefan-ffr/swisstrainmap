@@ -12,24 +12,30 @@ import { Timetable } from './timetable.js';
 import { RealtimeStore } from './realtime.js';
 import { todayKey } from './time.js';
 import { LegStore } from './legs.js';
-import { ensureRailOsm, loadRailNetwork } from './rail-network.js';
+import { ensureRailOsm, loadRailNetwork, PROFILES } from './rail-network.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const log = (msg) => console.log(`[${new Date().toISOString()}] ${msg}`);
 
 const state = { timetable: null, loading: false, loadedAt: null, loadError: null };
 const realtime = new RealtimeStore();
-const legStore = config.railRouting ? new LegStore(path.resolve(root, config.railLegsCacheFile), log) : null;
+const networks = [config.railRouting && 'rail', config.roadRouting && 'road'].filter(Boolean);
+const legStore = networks.length ? new LegStore(path.resolve(root, config.railLegsCacheFile), log, networks) : null;
+const NETWORK_SOURCES = {
+  rail: { path: config.railOsmPath, cache: config.railOsmCacheFile },
+  road: { path: config.roadOsmPath, cache: config.roadOsmCacheFile },
+};
 const legCacheLoaded = legStore?.loadCache();
 
-/** Gleisnetz nur laden, wenn Abschnitte fehlen – danach wieder freigeben. */
+/** Netze nur laden, wenn Abschnitte fehlen – danach wieder freigeben. */
 async function computeLegs() {
   if (!legStore) return;
-  await legStore.computeMissing(async () => {
-    const file = config.railOsmPath
-      ? path.resolve(root, config.railOsmPath)
-      : await ensureRailOsm(config.overpassUrls, path.resolve(root, config.railOsmCacheFile), config.railOsmMaxAgeDays, log);
-    return loadRailNetwork(file, log);
+  await legStore.computeMissing(async (name) => {
+    const profile = PROFILES[name], src = NETWORK_SOURCES[name];
+    const file = src.path
+      ? path.resolve(root, src.path)
+      : await ensureRailOsm(config.overpassUrls, path.resolve(root, src.cache), config.railOsmMaxAgeDays, log, profile);
+    return loadRailNetwork(file, log, profile);
   });
 }
 

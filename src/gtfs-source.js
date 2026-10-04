@@ -45,10 +45,14 @@ export async function openGtfs(filePath) {
  * erneut geladen. Geprüft wird höchstens alle checkHours Stunden.
  */
 export async function ensureDownloaded(url, cacheFile, checkHours, log = console.log) {
+  // cacheFile.source enthält die zuletzt geladene Datei-URL; ihr Zeitstempel
+  // ist der Zeitpunkt der letzten Prüfung. Die ZIP-Datei selbst bleibt
+  // unverändert, sonst hielte sich der Auszug (gtfs-extract.js) für veraltet.
   const sourceFile = `${cacheFile}.source`;
   let stat = null;
   try { stat = await fsp.stat(cacheFile); } catch { /* noch kein Cache */ }
-  if (stat && (Date.now() - stat.mtimeMs) / 3600e3 < checkHours) return cacheFile;
+  const checked = await fsp.stat(sourceFile).then((s) => s.mtimeMs).catch(() => stat?.mtimeMs ?? 0);
+  if (stat && (Date.now() - checked) / 3600e3 < checkHours) return cacheFile;
 
   let target = url;
   try {
@@ -65,7 +69,7 @@ export async function ensureDownloaded(url, cacheFile, checkHours, log = console
   const known = await fsp.readFile(sourceFile, 'utf8').catch(() => null);
   if (stat && target !== url && known === target) {
     const now = new Date();
-    await fsp.utimes(cacheFile, now, now); // nächste Prüfung erst nach checkHours
+    await fsp.utimes(sourceFile, now, now); // nächste Prüfung erst nach checkHours
     log(`GTFS: Fahrplan ist aktuell (${path.basename(new URL(target).pathname)})`);
     return cacheFile;
   }

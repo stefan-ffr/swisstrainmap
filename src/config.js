@@ -39,6 +39,10 @@ export const config = {
   railOsmCacheFile: env.RAIL_OSM_CACHE_FILE || 'data/rail-osm.json',
   railOsmMaxAgeDays: Number(env.RAIL_OSM_MAX_AGE_DAYS || 30),
   railLegsCacheFile: env.RAIL_LEGS_CACHE_FILE || 'data/rail-legs.json',
+  // Busse auf den Strassen der OSM-Buslinien (route=bus) statt in Luftlinie.
+  roadRouting: env.ROAD_ROUTING !== '0',
+  roadOsmPath: env.ROAD_OSM_PATH || '',
+  roadOsmCacheFile: env.ROAD_OSM_CACHE_FILE || 'data/road-osm.json',
 
   // Fahrten ohne Halt in diesem Gebiet (Süd, West, Nord, Ost) werden ignoriert.
   bbox: list(env.BBOX || '45.75,5.85,47.85,10.55').map(Number),

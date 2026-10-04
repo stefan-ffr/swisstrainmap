@@ -45,3 +45,20 @@ test('Polyline-Kodierung und Vereinfachung', () => {
   // Mittelpunkt einer Geraden fällt weg, der Knick bleibt
   assert.deepEqual(simplify(coords, 2), [coords[0], coords[2], coords[3]]);
 });
+
+test('Busnetz: rechtwinklig abbiegen erlaubt, Einbahnstrassen beachtet', async () => {
+  const { PROFILES } = await import('../src/rail-network.js');
+  // Kreuzung bei 2: 1-2 nach Osten, 2-3 nach Norden (90°). 4-5 ist eine
+  // Einbahnstrasse von 4 nach 5; der Weg 5 -> 4 muss den Umweg über 6 nehmen.
+  const pts = { 1: P(0, 0), 2: P(10, 0), 3: P(10, 10), 4: P(20, 0), 5: P(30, 0), 6: P(25, 6) };
+  const elements = Object.entries(pts).map(([id, [lat, lon]]) => ({ type: 'node', id: Number(id), lat, lon }));
+  elements.push(
+    { type: 'way', id: 1, nodes: [1, 2, 3] },
+    { type: 'way', id: 2, nodes: [4, 5], tags: { oneway: 'yes' } },
+    { type: 'way', id: 3, nodes: [5, 6, 4] },
+  );
+  const net = new RailNetwork({ elements }, PROFILES.road);
+  assert.deepEqual(net.route(P(0, 0), P(10, 10)), [pts[1], pts[2], pts[3]]);
+  assert.deepEqual(net.route(P(30, 0), P(20, 0)), [pts[5], pts[6], pts[4]]);
+  assert.deepEqual(net.route(P(20, 0), P(30, 0)), [pts[4], pts[5]]);
+});
