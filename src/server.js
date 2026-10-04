@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
 import { openGtfs, ensureDownloaded } from './gtfs-source.js';
 import { loadGtfs } from './gtfs-loader.js';
-import { ensureExtract } from './gtfs-extract.js';
+import { ensureExtractInWorker } from './extract-worker.js';
 import { Timetable } from './timetable.js';
 import { RealtimeStore } from './realtime.js';
 import { todayKey } from './time.js';
@@ -47,7 +47,7 @@ async function reload() {
       || await ensureDownloaded(config.gtfsUrl, path.resolve(root, config.gtfsCacheFile), config.gtfsMaxAgeHours, log);
     let source = path.resolve(root, file);
     try {
-      source = await ensureExtract(source, path.resolve(root, config.gtfsExtractDir), config.routeTypes, log);
+      source = await ensureExtractInWorker(source, path.resolve(root, config.gtfsExtractDir), config.routeTypes, log);
     } catch (err) {
       log(`GTFS: Auszug fehlgeschlagen (${err.message}) – lese den Fahrplan direkt (langsamer)`);
     }
