@@ -3,18 +3,21 @@
 // Starts und Tageswechsel schnell gehen:
 //  - service_days.txt: Verkehrstage als Bitmaske statt calendar(_dates).txt
 //    (im Schweizer Feed allein 11 Mio. Ausnahme-Zeilen),
-//  - stop_times.idx: pro Zeile in trips.txt Byte-Position und -Länge der
-//    zugehörigen Haltezeiten in stop_times.txt; der Loader liest damit nur die
-//    Fahrten der benötigten Tage statt aller ~42 Mio. Zeilen.
+//  - stop_times.bin: Haltezeiten binär, pro Zeile 4 × Int32 (Halt-Index =
+//    Zeile in stops.txt, Ankunft, Abfahrt in s, stop_sequence) – nichts mehr
+//    zu zerlegen, und 16 statt ~85 Bytes pro Zeile,
+//  - stop_times.idx: pro Zeile in trips.txt erste Zeile und Anzahl in
+//    stop_times.bin (2 × Uint32); der Loader liest damit nur die Fahrten der
+//    benötigten Tage statt aller ~42 Mio. Zeilen.
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { once } from 'node:events';
 import { readCsv, parseLine } from './csv.js';
 import { openGtfs } from './gtfs-source.js';
-import { addDays, weekday } from './time.js';
+import { addDays, parseGtfsTime, weekday } from './time.js';
 
-const VERSION = 3;
+const VERSION = 4;
 const stripBom = (line) => line.replace(/^﻿/, '');
 
 // Schreibt synchron aus dem CSV-Callback; die Festplatte ist schneller als das
@@ -150,49 +153,60 @@ export async function ensureExtract(sourceFile, outDir, routeTypes, log = consol
       return true;
     });
 
-    // stop_times: Zeilen nur zerlegen, wenn die Fahrt im Auszug ist; Position merken
-    const offset = new Float64Array(trips.size).fill(-1);
-    const length = new Uint32Array(trips.size);
-    let contiguous = true, current = -1;
-    const stops = new Set();
-    const w = new Writer(path.join(tmp, 'stop_times.txt'));
-    let tripCol = 0, stopCol = 0, kept = 0;
+    // Halte: vollständig übernehmen, der Index in stop_times.bin ist die Zeilennummer
+    const stopIndex = new Map();
+    await filterFile(src, 'stops.txt', tmp, (r, i) => {
+      stopIndex.set(r[i.stop_id], stopIndex.size);
+      return true;
+    });
+
+    // stop_times: Zeilen nur zerlegen, wenn die Fahrt im Auszug ist
+    const first = new Uint32Array(trips.size), count = new Uint32Array(trips.size);
+    const bin = fs.createWriteStream(path.join(tmp, 'stop_times.bin'));
+    const CHUNK = 1 << 16; // Zeilen pro Schreibblock
+    let block = new Int32Array(CHUNK * 4), used = 0, kept = 0, current = -1, contiguous = true;
+    const flush = () => {
+      if (!used) return;
+      bin.write(Buffer.from(block.buffer, 0, used * 16));
+      block = new Int32Array(CHUNK * 4);
+      used = 0;
+    };
+    let tripCol = 0, col = null;
     await readCsv(await src.open('stop_times.txt'), (_, idx, line) => {
       const id = tripCol === 0 ? firstField(line) : parseLine(line)[tripCol];
       const k = trips.get(id);
       if (k === undefined) return;
+      const r = parseLine(line);
+      const stop = stopIndex.get(r[col.stop_id]);
+      if (stop === undefined) return;
       if (k !== current) {
-        if (offset[k] >= 0) contiguous = false; // Fahrt taucht ein zweites Mal auf
-        offset[k] = w.bytes;
+        if (count[k] > 0) contiguous = false; // Fahrt taucht ein zweites Mal auf
+        first[k] = kept;
         current = k;
       }
-      stops.add(parseLine(line)[stopCol]);
-      const before = w.bytes;
-      w.line(line);
-      length[k] += w.bytes - before;
+      const o = used * 4;
+      block[o] = stop;
+      block[o + 1] = parseGtfsTime(r[col.arrival_time]);
+      block[o + 2] = parseGtfsTime(r[col.departure_time]);
+      block[o + 3] = Number(r[col.stop_sequence]);
+      count[k]++;
       kept++;
+      if (++used === CHUNK) flush();
     }, {
       parse: false,
-      onHeader: (line, idx) => { tripCol = idx.trip_id; stopCol = idx.stop_id; w.line(stripBom(line)); },
+      onHeader: (line, idx) => { tripCol = idx.trip_id; col = idx; },
     });
-    await w.close();
-    if (contiguous) {
-      const idx = Buffer.alloc(trips.size * 12);
-      for (let k = 0; k < trips.size; k++) {
-        idx.writeDoubleLE(offset[k], k * 12);
-        idx.writeUInt32LE(length[k], k * 12 + 8);
-      }
-      await fsp.writeFile(path.join(tmp, 'stop_times.idx'), idx);
-    } else {
-      log('GTFS: stop_times.txt ist nicht nach Fahrten gruppiert – Auszug ohne Index');
+    flush();
+    bin.end();
+    await once(bin, 'finish');
+    if (!contiguous) throw new Error('stop_times.txt ist nicht nach Fahrten gruppiert – Auszug nicht möglich');
+    const idx = Buffer.alloc(trips.size * 8);
+    for (let k = 0; k < trips.size; k++) {
+      idx.writeUInt32LE(first[k], k * 8);
+      idx.writeUInt32LE(count[k], k * 8 + 4);
     }
+    await fsp.writeFile(path.join(tmp, 'stop_times.idx'), idx);
 
-    // Halte inkl. übergeordneter Stationen (für Namen)
-    const parents = new Set();
-    await readCsv(await src.open('stops.txt'), (r, i) => {
-      if (stops.has(r[i.stop_id]) && i.parent_station !== undefined && r[i.parent_station]) parents.add(r[i.parent_station]);
-    });
-    await filterFile(src, 'stops.txt', tmp, (r, i) => stops.has(r[i.stop_id]) || parents.has(r[i.stop_id]));
     await writeServiceDays(src, tmp, services);
     await filterFile(src, 'agency.txt', tmp, () => true);
     await filterFile(src, 'feed_info.txt', tmp, () => true);

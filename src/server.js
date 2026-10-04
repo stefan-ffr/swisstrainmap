@@ -39,8 +39,13 @@ async function reload() {
   try {
     const file = config.gtfsPath
       || await ensureDownloaded(config.gtfsUrl, path.resolve(root, config.gtfsCacheFile), config.gtfsMaxAgeHours, log);
-    const extract = await ensureExtract(path.resolve(root, file), path.resolve(root, config.gtfsExtractDir), config.routeTypes, log);
-    const src = await openGtfs(extract);
+    let source = path.resolve(root, file);
+    try {
+      source = await ensureExtract(source, path.resolve(root, config.gtfsExtractDir), config.routeTypes, log);
+    } catch (err) {
+      log(`GTFS: Auszug fehlgeschlagen (${err.message}) – lese den Fahrplan direkt (langsamer)`);
+    }
+    const src = await openGtfs(source);
     try {
       const data = await loadGtfs(src, {
         routeTypes: config.routeTypes,

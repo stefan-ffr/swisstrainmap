@@ -44,7 +44,10 @@ test('Bahn-Auszug liefert dieselben Verkehrstage und nur Bahnfahrten', async () 
 
   assert.ok(fs.existsSync(path.join(extract, 'service_days.txt')));
   assert.ok(!fs.readFileSync(path.join(extract, 'trips.txt'), 'utf8').includes('BUS'));
-  assert.ok(!fs.readFileSync(path.join(extract, 'stops.txt'), 'utf8').includes('"Bus"'));
+  assert.ok(!fs.existsSync(path.join(extract, 'stop_times.txt')), 'Haltezeiten nur binär');
+  const rail = await loadData(extract, 20261006);
+  assert.deepEqual([...rail.trips.keys()].sort(), ['T2']);
+  assert.ok(!rail.stops.id.includes('Z'), 'Bushaltestelle nicht geladen');
 
   for (const day of [20261003, 20261005, 20261006]) {
     assert.deepEqual(await load(extract, day), await load(feed, day), `Tag ${day}`);
