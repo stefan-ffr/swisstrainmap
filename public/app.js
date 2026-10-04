@@ -1,0 +1,393 @@
+/* global L */
+'use strict';
+
+const POLL_MS = 10_000;
+const ANIM_MS = 250;
+const LABEL_MIN_ZOOM = 11;
+
+// Verkehrsmittel: Züge immer, alle anderen erst ab einer Zoomstufe (sonst
+// wären es landesweit tausende Fahrzeuge). Abgefragt wird dann nur der Ausschnitt.
+const MODES = {
+  rail: { label: 'Züge', minZoom: 0, color: null, radius: 6 },
+  ship: { label: 'Schiffe', minZoom: 10, color: '#0c8599', radius: 6 },
+  metro: { label: 'Metro', minZoom: 11, color: '#a61e4d', radius: 5 },
+  funicular: { label: 'Standseilbahnen', minZoom: 11, color: '#6741d9', radius: 5 },
+  cable: { label: 'Luftseilbahnen', minZoom: 11, color: '#795548', radius: 5 },
+  tram: { label: 'Trams', minZoom: 12, color: '#d6336c', radius: 5 },
+  bus: { label: 'Busse', minZoom: 13, color: '#e8a400', radius: 4 },
+};
+const hiddenModes = new Set();
+
+const CATEGORY_COLORS = {
+  IC: '#d40000', ICE: '#d40000', EC: '#d40000', TGV: '#d40000', RJ: '#d40000', RJX: '#d40000', EN: '#d40000', NJ: '#d40000', ICN: '#d40000',
+  IR: '#ef7d00', PE: '#9c5b00',
+  RE: '#7a3db8',
+  S: '#1f6fd1', SN: '#1f6fd1',
+  R: '#2e9b45',
+};
+const colorOf = (cat) => CATEGORY_COLORS[cat] || '#5f6b7a';
+const colorFor = (t) => (t.mode && t.mode !== 'rail' ? MODES[t.mode]?.color ?? '#5f6b7a' : colorOf(t.cat));
+const modeActive = (mode) => !hiddenModes.has(mode) && map.getZoom() >= (MODES[mode]?.minZoom ?? 0);
+
+// --- Karte ------------------------------------------------------------------
+
+const map = L.map('map', { preferCanvas: true, zoomControl: false }).setView([46.82, 8.22], 8);
+L.control.zoom({ position: 'topright' }).addTo(map);
+
+const osmAttr = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>-Mitwirkende';
+const swisstopo = (layer) => L.tileLayer(`https://wmts.geo.admin.ch/1.0.0/${layer}/default/current/3857/{z}/{x}/{y}.jpeg`, {
+  maxZoom: 19, maxNativeZoom: 18, attribution: '&copy; <a href="https://www.swisstopo.admin.ch/">swisstopo</a>',
+});
+const baseLayers = {
+  'Landeskarte grau (swisstopo)': swisstopo('ch.swisstopo.pixelkarte-grau'),
+  'Landeskarte farbig (swisstopo)': swisstopo('ch.swisstopo.pixelkarte-farbe'),
+  OpenStreetMap: L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: osmAttr }),
+};
+const ormAttr = `${osmAttr} · Bahninfrastruktur: <a href="https://www.openrailwaymap.org/">OpenRailwayMap</a> (CC-BY-SA)`;
+const orm = (style) => L.tileLayer(`https://{s}.tiles.openrailwaymap.org/${style}/{z}/{x}/{y}.png`, {
+  subdomains: 'abc', maxZoom: 19, tileSize: 256, attribution: ormAttr,
+});
+const overlays = {
+  'OpenRailwayMap: Infrastruktur': orm('standard'),
+  'OpenRailwayMap: Höchstgeschwindigkeit': orm('maxspeed'),
+  'OpenRailwayMap: Signale': orm('signals'),
+  'OpenRailwayMap: Elektrifizierung': orm('electrification'),
+};
+baseLayers['Landeskarte grau (swisstopo)'].addTo(map);
+overlays['OpenRailwayMap: Infrastruktur'].addTo(map);
+L.control.layers(baseLayers, overlays, { position: 'topright' }).addTo(map);
+
+const trainLayer = L.layerGroup().addTo(map);
+const routeLayer = L.layerGroup().addTo(map);
+
+// --- Zustand ----------------------------------------------------------------
+
+const trains = new Map(); // id -> { data, marker }
+const hiddenCats = new Set();
+let clockOffset = 0; // Serverzeit - Browserzeit
+let selectedId = null;
+let query = '';
+
+const now = () => Date.now() + clockOffset;
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+const fmtTime = (ms) => new Date(ms).toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Zurich' });
+
+function delayClass(sec) {
+  if (sec < 180) return 'delay-ok';
+  if (sec < 360) return 'delay-warn';
+  return 'delay-bad';
+}
+const delayStroke = (t) => (!t.rt ? '#ffffff' : { 'delay-ok': '#2e9b45', 'delay-warn': '#e69500', 'delay-bad': '#d62b2b' }[delayClass(t.delay)]);
+const delayText = (sec) => (Math.abs(sec) < 60 ? 'pünktlich' : `${sec > 0 ? '+' : ''}${Math.round(sec / 60)}'`);
+const label = (t) => `${t.name}${t.num ? ` ${t.num}` : ''}`;
+
+// --- Streckengeometrie ------------------------------------------------------
+
+const legs = new Map(); // id -> { coords, cum, total } | null (keine Geometrie: Luftlinie)
+let legsVersion = null;
+let legsLoading = false;
+
+function decodePolyline(str) {
+  const coords = [];
+  let i = 0, lat = 0, lon = 0;
+  const dec = () => {
+    let result = 0, shift = 0, b;
+    do { b = str.charCodeAt(i++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+    return result & 1 ? ~(result >> 1) : result >> 1;
+  };
+  while (i < str.length) { lat += dec(); lon += dec(); coords.push([lat / 1e5, lon / 1e5]); }
+  return coords;
+}
+
+function makeLeg(encoded) {
+  if (!encoded) return null;
+  const coords = decodePolyline(encoded);
+  const cum = [0];
+  for (let k = 1; k < coords.length; k++) {
+    const [a, b] = [coords[k - 1], coords[k]];
+    const dx = (b[1] - a[1]) * Math.cos((a[0] * Math.PI) / 180), dy = b[0] - a[0];
+    cum.push(cum[k - 1] + Math.hypot(dx, dy));
+  }
+  return { coords, cum, total: cum[cum.length - 1] };
+}
+
+/** Holt fehlende Legs (in Blöcken); noch nicht berechnete werden später erneut angefragt. */
+async function loadLegs(version, ids) {
+  if (version !== legsVersion) { legs.clear(); legsVersion = version; }
+  const missing = [...new Set(ids)].filter((id) => id >= 0 && !legs.has(id));
+  if (!missing.length || legsLoading) return;
+  legsLoading = true;
+  try {
+    for (let k = 0; k < missing.length; k += 500) {
+      const res = await fetch(`api/legs?ids=${missing.slice(k, k + 500).join(',')}`);
+      const body = await res.json();
+      if (body.version !== legsVersion) return;
+      for (const [id, enc] of Object.entries(body.legs)) {
+        if (enc !== null) legs.set(Number(id), makeLeg(enc));
+      }
+    }
+  } catch { /* nächster Versuch beim nächsten Poll */ } finally {
+    legsLoading = false;
+  }
+}
+
+function alongLeg(leg, f) {
+  const d = f * leg.total;
+  const { coords, cum } = leg;
+  let lo = 0, hi = cum.length - 1;
+  while (lo < hi - 1) { const mid = (lo + hi) >> 1; if (cum[mid] <= d) lo = mid; else hi = mid; }
+  const span = cum[hi] - cum[lo];
+  const g = span > 0 ? (d - cum[lo]) / span : 0;
+  return [coords[lo][0] + (coords[hi][0] - coords[lo][0]) * g, coords[lo][1] + (coords[hi][1] - coords[lo][1]) * g];
+}
+
+/** Standort eines haltenden Zugs: Anfang des folgenden bzw. Ende des vorherigen Legs. */
+function stopPosition(points, j) {
+  const out = legs.get(points[j][4]);
+  if (out) return out.coords[0];
+  const inc = j > 0 ? legs.get(points[j - 1][4]) : null;
+  if (inc) return inc.coords[inc.coords.length - 1];
+  return [points[j][0], points[j][1]];
+}
+
+/** Position zum Zeitpunkt t aus den Wegpunkten [lat, lon, ankunft, abfahrt, legId]. */
+function positionAt(points, t) {
+  if (t < points[0][3]) return stopPosition(points, 0);
+  for (let j = 0; j < points.length - 1; j++) {
+    const a = points[j], b = points[j + 1];
+    if (t <= b[2]) {
+      const f = b[2] > a[3] ? Math.max(0, (t - a[3]) / (b[2] - a[3])) : 1;
+      const leg = legs.get(a[4]);
+      if (leg) return alongLeg(leg, f);
+      return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f];
+    }
+    if (t < b[3]) return stopPosition(points, j + 1);
+  }
+  return stopPosition(points, points.length - 1);
+}
+
+function matches(t) {
+  if (!modeActive(t.mode || 'rail')) return false;
+  if ((t.mode || 'rail') === 'rail' && hiddenCats.has(t.cat)) return false;
+  if (!query) return true;
+  return [t.name, t.num, label(t), t.to, t.next, t.at, t.op].some((s) => s && String(s).toLowerCase().includes(query));
+}
+
+// --- Daten laden ------------------------------------------------------------
+
+async function fetchTrains(params) {
+  const res = await fetch(`api/trains?${new URLSearchParams(params)}`);
+  const body = await res.json();
+  if (!res.ok) throw new Error(body.error || res.statusText);
+  return body;
+}
+
+let pollSeq = 0;
+async function poll() {
+  const seq = ++pollSeq;
+  try {
+    // Züge landesweit (für Übersicht und Statistik), übrige Verkehrsmittel nur im Ausschnitt
+    const others = Object.keys(MODES).filter((m) => m !== 'rail' && modeActive(m));
+    const b = map.getBounds().pad(0.3);
+    const requests = [fetchTrains({ modes: 'rail' })];
+    if (others.length) {
+      requests.push(fetchTrains({ modes: others.join(','), bbox: [b.getSouth(), b.getWest(), b.getNorth(), b.getEast()].map((v) => v.toFixed(4)).join(',') }));
+    }
+    const bodies = await Promise.all(requests);
+    if (seq !== pollSeq) return; // neuere Abfrage unterwegs
+    const body = { ...bodies[0], trains: bodies.flatMap((x) => x.trains) };
+    clockOffset = body.serverTime - Date.now();
+    const seen = new Set();
+    for (const t of body.trains) {
+      seen.add(t.id);
+      let entry = trains.get(t.id);
+      if (!entry) {
+        const marker = L.circleMarker(positionAt(t.points, now()), { radius: MODES[t.mode]?.radius ?? 6, weight: 2, fillOpacity: 0.95, bubblingMouseEvents: false });
+        marker.on('click', () => select(t.id));
+        entry = { marker };
+        trains.set(t.id, entry);
+      }
+      entry.data = t;
+      entry.marker.setStyle({ fillColor: colorFor(t), color: delayStroke(t) });
+    }
+    for (const [id, entry] of trains) {
+      if (!seen.has(id)) { trainLayer.removeLayer(entry.marker); trains.delete(id); }
+    }
+    applyFilter();
+    updateStats();
+    loadLegs(body.legsVersion, body.trains.flatMap((t) => t.points.map((p) => p[4])));
+    if (selectedId) showDetails(selectedId, false);
+  } catch (err) {
+    $('stats').textContent = `Keine Daten: ${err.message}`;
+  }
+}
+
+async function pollStatus() {
+  try {
+    const s = await (await fetch('api/status')).json();
+    const rt = s.realtime;
+    let text = rt.enabled
+      ? `Echtzeit: ${rt.trips} Fahrten mit Prognose${rt.lastSuccess ? `, Stand ${fmtTime(Date.parse(rt.lastSuccess))}` : ''}`
+      : 'Echtzeit aus – Positionen nach Fahrplan (GTFS_RT_API_KEY setzen)';
+    if (rt.lastError) text += ` · Fehler: ${rt.lastError}`;
+    const lg = s.legs;
+    if (lg?.error) text += ` · Gleisnetz: ${lg.error}`;
+    else if (lg?.running) text += ` · Strecken werden berechnet: ${lg.done}/${lg.total}`;
+    else if (lg?.total) text += ` · ${lg.routed}/${lg.total} Abschnitte auf Gleisen`;
+    $('status').textContent = text;
+  } catch { /* ignorieren */ }
+}
+
+// --- Darstellung ------------------------------------------------------------
+
+function animate() {
+  const t = now();
+  for (const { data, marker } of trains.values()) {
+    if (trainLayer.hasLayer(marker)) marker.setLatLng(positionAt(data.points, t));
+  }
+  $('clock').textContent = new Date(t).toLocaleTimeString('de-CH', { timeZone: 'Europe/Zurich' });
+}
+
+function applyFilter() {
+  for (const [id, { data, marker }] of trains) {
+    const visible = matches(data) || id === selectedId;
+    if (visible && !trainLayer.hasLayer(marker)) trainLayer.addLayer(marker);
+    if (!visible && trainLayer.hasLayer(marker)) trainLayer.removeLayer(marker);
+  }
+  updateLabels();
+}
+
+function updateLabels() {
+  const zoom = map.getZoom();
+  const bounds = map.getBounds().pad(0.2);
+  for (const { data, marker } of trains.values()) {
+    const minZoom = Math.max(LABEL_MIN_ZOOM, (MODES[data.mode]?.minZoom ?? 0) + 1);
+    const want = zoom >= minZoom && trainLayer.hasLayer(marker) && bounds.contains(marker.getLatLng());
+    const has = !!marker.getTooltip();
+    if (want && !has) marker.bindTooltip(label(data), { permanent: true, direction: 'right', offset: [6, 0], className: 'train-label' });
+    else if (!want && has) marker.unbindTooltip();
+  }
+}
+
+function updateStats() {
+  const counts = new Map(), perMode = {};
+  let late = 0;
+  for (const { data } of trains.values()) {
+    const mode = data.mode || 'rail';
+    if (!matches(data)) continue;
+    perMode[mode] = (perMode[mode] || 0) + 1;
+    if (mode === 'rail') counts.set(data.cat, (counts.get(data.cat) || 0) + 1);
+    if (data.rt && data.delay >= 180) late++;
+  }
+  const parts = Object.keys(MODES).filter((m) => perMode[m]).map((m) => `${perMode[m]} ${MODES[m].label}`);
+  $('stats').textContent = `${parts.join(' · ') || 'Keine Fahrzeuge'} unterwegs${late ? ` · ${late} mit ≥ 3' Verspätung` : ''}`;
+
+  const zoom = map.getZoom();
+  $('modes').innerHTML = Object.entries(MODES).map(([m, cfg]) => {
+    const tooFar = zoom < cfg.minZoom;
+    const dot = cfg.color ?? CATEGORY_COLORS.IC;
+    const hint = tooFar ? ` <small>ab Zoom ${cfg.minZoom}</small>` : '';
+    return `<li data-mode="${m}" class="${hiddenModes.has(m) ? 'off' : ''} ${tooFar ? 'far' : ''}"><i style="background:${dot}"></i>${cfg.label}${hint}</li>`;
+  }).join('');
+
+  const legend = $('legend');
+  const cats = [...counts.keys()].sort((a, b) => counts.get(b) - counts.get(a));
+  legend.innerHTML = cats.map((c) => `<li data-cat="${esc(c)}" class="${hiddenCats.has(c) ? 'off' : ''}" style="background:${colorOf(c)}">${esc(c)} ${counts.get(c)}</li>`).join('');
+}
+
+$('modes').addEventListener('click', (e) => {
+  const mode = e.target.closest('li')?.dataset.mode;
+  if (!mode) return;
+  if (hiddenModes.has(mode)) hiddenModes.delete(mode); else hiddenModes.add(mode);
+  applyFilter();
+  updateStats();
+  poll();
+});
+
+$('legend').addEventListener('click', (e) => {
+  const cat = e.target.closest('li')?.dataset.cat;
+  if (!cat) return;
+  if (hiddenCats.has(cat)) hiddenCats.delete(cat); else hiddenCats.add(cat);
+  applyFilter();
+  updateStats();
+});
+
+$('search').addEventListener('input', (e) => {
+  query = e.target.value.trim().toLowerCase();
+  applyFilter();
+  updateStats();
+});
+
+// Nach Verschieben/Zoomen: Beschriftungen anpassen und Ausschnitt neu laden
+let moveTimer = null;
+map.on('moveend zoomend', () => {
+  updateLabels();
+  applyFilter();
+  updateStats();
+  clearTimeout(moveTimer);
+  moveTimer = setTimeout(poll, 300);
+});
+
+// --- Detailansicht einer Fahrt ---------------------------------------------
+
+function select(id) {
+  selectedId = id;
+  showDetails(id, true);
+}
+
+function closeDetails() {
+  selectedId = null;
+  routeLayer.clearLayers();
+  $('details').hidden = true;
+  applyFilter();
+}
+
+async function showDetails(id, fit) {
+  const res = await fetch(`api/trip/${encodeURIComponent(id)}`);
+  if (!res.ok || id !== selectedId) return;
+  const trip = await res.json();
+  const live = trains.get(id)?.data;
+  const t = now();
+
+  routeLayer.clearLayers();
+  // Leg k verbindet Halt k mit k+1; ohne Geometrie direkt von Halt zu Halt
+  const path = trip.stops.flatMap((s, k) => (trip.legs[k] ? decodePolyline(trip.legs[k]) : [[s.lat, s.lon]]));
+  const line = L.polyline(path, { color: colorFor(trip), weight: 4, opacity: 0.6 });
+  routeLayer.addLayer(line);
+  for (const s of trip.stops) routeLayer.addLayer(L.circleMarker([s.lat, s.lon], { radius: 3, color: colorFor(trip), weight: 2, fillColor: '#fff', fillOpacity: 1 }));
+  if (fit) map.fitBounds(line.getBounds(), { paddingTopLeft: [window.innerWidth > 600 ? 360 : 20, 40], paddingBottomRight: [40, 40], maxZoom: 12 });
+  trains.get(id)?.marker.bringToFront();
+
+  const rows = trip.stops.map((s) => {
+    const passed = (s.depRt ?? s.arrRt) < t;
+    const cur = live && (live.at === s.name || (!live.at && live.next === s.name));
+    const cell = (plan, rt) => {
+      if (plan == null) return '';
+      const d = rt - plan;
+      const extra = trip.rt && Math.abs(d) >= 60 ? ` <span class="${delayClass(d)}">${delayText(d)}</span>` : '';
+      return fmtTime(plan) + extra;
+    };
+    return `<tr class="${passed ? 'past' : ''} ${cur ? 'cur' : ''}"><td>${esc(s.name)}</td><td class="t">${cell(s.arr, s.arrRt)}</td><td class="t">${cell(s.dep, s.depRt)}</td></tr>`;
+  }).join('');
+
+  const delay = live && trip.rt ? ` · <span class="${delayClass(live.delay)}">${delayText(live.delay)}</span>` : '';
+  const where = live ? (live.at ? `Halt in ${esc(live.at)}` : `Fährt nach ${esc(live.next)}`) : 'nicht unterwegs';
+  $('details').innerHTML = `
+    <button class="close" title="Schliessen">✕</button>
+    <h2 style="color:${colorFor(trip)}">${esc(trip.name)} ${esc(trip.num || '')} → ${esc(trip.to || trip.stops.at(-1).name)}</h2>
+    <div class="sub">${esc(trip.op)}${trip.op ? ' · ' : ''}${where}${delay}${trip.canceled ? ' · <b class="delay-bad">fällt aus</b>' : ''}${trip.rt ? '' : ' · nur Fahrplan'}</div>
+    <table><tr><td></td><td class="t">an</td><td class="t">ab</td></tr>${rows}</table>`;
+  $('details').hidden = false;
+  $('details').querySelector('.close').onclick = closeDetails;
+}
+
+map.on('click', () => { if (selectedId) closeDetails(); });
+
+// --- Start ------------------------------------------------------------------
+
+poll();
+pollStatus();
+setInterval(poll, POLL_MS);
+setInterval(pollStatus, 30_000);
+setInterval(animate, ANIM_MS);

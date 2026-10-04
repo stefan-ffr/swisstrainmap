@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Swiss Train Map</title>
+  <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect width=%2232%22 height=%2232%22 rx=%226%22 fill=%22%23eb0000%22/%3E%3Cpath d=%22M13 6h6v7h7v6h-7v7h-6v-7H6v-6h7z%22 fill=%22%23fff%22/%3E%3C/svg%3E">
+</head>
+<body>
+  <div id="map"></div>
+  <aside id="panel">
+    <header>
+      <h1>Swiss Train Map</h1>
+      <div id="clock">--:--:--</div>
+    </header>
+    <input id="search" type="search" placeholder="Suchen (z. B. IC1, S12, Tram 4, Bern)" autocomplete="off">
+    <div id="stats">Lade Fahrplan …</div>
+    <ul id="modes" aria-label="Verkehrsmittel"></ul>
+    <ul id="legend" aria-label="Zugkategorien"></ul>
+    <div id="details" hidden></div>
+    <footer id="status"></footer>
+  </aside>
+  <script src="vendor/leaflet/leaflet.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

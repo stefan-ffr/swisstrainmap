@@ -1,0 +1,22 @@
+{
+  "name": "swisstrainmap",
+  "version": "0.1.0",
+  "description": "Live-Karte der Züge in der Schweiz auf Basis von GTFS / GTFS-RT (opentransportdata.swiss) und OpenRailwayMap",
+  "private": true,
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "demo": "node scripts/make-demo-gtfs.js data/demo-gtfs && GTFS_PATH=data/demo-gtfs GTFS_EXTRACT_DIR=data/demo-gtfs-rail RAIL_OSM_PATH=data/demo-gtfs/rail-osm.json RAIL_LEGS_CACHE_FILE=data/demo-legs.json node src/server.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "gtfs-realtime-bindings": "^2.2.0",
+    "leaflet": "^1.9.4",
+    "yauzl": "^3.4.0"
+  }
+}
