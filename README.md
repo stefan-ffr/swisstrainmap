@@ -55,6 +55,22 @@ docker build -t swisstrainmap .
 docker run -p 8080:8080 -v "$(pwd)/data:/app/data" -e GTFS_RT_API_KEY=<dein-key> swisstrainmap
 ```
 
+### Betrieb auf einem VPS (Docker + automatisches HTTPS)
+
+Voraussetzungen: Docker mit Compose-Plugin, Ports 80 und 443 frei, ein DNS-Eintrag (A/AAAA) der Domain auf den
+Server. Mit allen Verkehrsmitteln braucht der Server im Betrieb rund 1,4 GB RAM und beim einmaligen Erstellen
+des Auszugs pro Fahrplan-Version kurz rund 1,6 GB; ein VPS mit 4 GB reicht gut. Auf der Festplatte belegen
+Fahrplan, Auszug und Gleisnetz zusammen etwa 1,5 GB in `./data`.
+
+```bash
+git clone https://github.com/stefan-ffr/swisstrainmap.git && cd swisstrainmap
+cp deploy/env.example .env      # Domain und GTFS_RT_API_KEY eintragen
+docker compose up -d --build
+docker compose logs -f app      # erster Start: Download + Auszug ≈ 3–4 Minuten
+```
+
+Caddy holt das Zertifikat für die Domain automatisch. Updates: `git pull && docker compose up -d --build`.
+
 ### API-Key
 
 Für die Echtzeitdaten braucht es einen (kostenlosen) Key von
