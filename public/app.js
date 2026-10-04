@@ -66,6 +66,8 @@ const trains = new Map(); // id -> { data, marker }
 const hiddenCats = new Set();
 let clockOffset = 0; // Serverzeit - Browserzeit
 let selectedId = null;
+let follow = false; // Karte folgt dem ausgewählten Fahrzeug
+const FOLLOW_ZOOM = 15;
 let query = '';
 
 const now = () => Date.now() + clockOffset;
@@ -217,7 +219,7 @@ async function poll() {
     applyFilter();
     updateStats();
     loadLegs(body.legsVersion, body.trains.flatMap((t) => t.points.map((p) => p[4])));
-    if (selectedId) showDetails(selectedId, false);
+    if (selectedId) showDetails(selectedId);
   } catch (err) {
     $('stats').textContent = `Keine Daten: ${err.message}`;
   }
@@ -246,6 +248,8 @@ function animate() {
   for (const { data, marker } of trains.values()) {
     if (trainLayer.hasLayer(marker)) marker.setLatLng(positionAt(data.points, t));
   }
+  const followed = follow && selectedId && trains.get(selectedId)?.marker;
+  if (followed) map.panTo(followed.getLatLng(), { animate: true, duration: ANIM_MS / 1000, easeLinearity: 1, noMoveStart: true });
   $('clock').textContent = new Date(t).toLocaleTimeString('de-CH', { timeZone: 'Europe/Zurich' });
 }
 
@@ -333,17 +337,30 @@ map.on('moveend zoomend', () => {
 
 function select(id) {
   selectedId = id;
-  showDetails(id, true);
+  setFollow(true);
+  const marker = trains.get(id)?.marker;
+  if (marker) map.setView(marker.getLatLng(), Math.max(map.getZoom(), FOLLOW_ZOOM));
+  showDetails(id);
 }
 
+function setFollow(on) {
+  follow = on;
+  const btn = $('follow-btn');
+  if (btn) { btn.setAttribute('aria-pressed', String(on)); btn.textContent = on ? 'Verfolgen: an' : 'Verfolgen'; }
+}
+
+// Wer die Karte selbst verschiebt, beendet das Verfolgen
+map.on('dragstart', () => setFollow(false));
+
 function closeDetails() {
+  setFollow(false);
   selectedId = null;
   routeLayer.clearLayers();
   $('details').hidden = true;
   applyFilter();
 }
 
-async function showDetails(id, fit) {
+async function showDetails(id) {
   const res = await fetch(`api/trip/${encodeURIComponent(id)}`);
   if (!res.ok || id !== selectedId) return;
   const trip = await res.json();
@@ -356,7 +373,6 @@ async function showDetails(id, fit) {
   const line = L.polyline(path, { color: colorFor(trip), weight: 4, opacity: 0.6 });
   routeLayer.addLayer(line);
   for (const s of trip.stops) routeLayer.addLayer(L.circleMarker([s.lat, s.lon], { radius: 3, color: colorFor(trip), weight: 2, fillColor: '#fff', fillOpacity: 1 }));
-  if (fit) map.fitBounds(line.getBounds(), { paddingTopLeft: [window.innerWidth > 600 ? 360 : 20, 40], paddingBottomRight: [40, 40], maxZoom: 12 });
   trains.get(id)?.marker.bringToFront();
 
   const rows = trip.stops.map((s) => {
@@ -368,7 +384,7 @@ async function showDetails(id, fit) {
       const extra = trip.rt && Math.abs(d) >= 60 ? ` <span class="${delayClass(d)}">${delayText(d)}</span>` : '';
       return fmtTime(plan) + extra;
     };
-    return `<tr class="${passed ? 'past' : ''} ${cur ? 'cur' : ''}"><td>${esc(s.name)}</td><td class="t">${cell(s.arr, s.arrRt)}</td><td class="t">${cell(s.dep, s.depRt)}</td></tr>`;
+    return `<tr class="stop ${passed ? 'past' : ''} ${cur ? 'cur' : ''}" data-lat="${s.lat}" data-lon="${s.lon}" title="Zu ${esc(s.name)} springen"><td>${esc(s.name)}</td><td class="t">${cell(s.arr, s.arrRt)}</td><td class="t">${cell(s.dep, s.depRt)}</td></tr>`;
   }).join('');
 
   const delay = live && trip.rt ? ` · <span class="${delayClass(live.delay)}">${delayText(live.delay)}</span>` : '';
@@ -377,9 +393,29 @@ async function showDetails(id, fit) {
     <button class="close" title="Schliessen">✕</button>
     <h2 style="color:${colorFor(trip)}">${esc(trip.name)} ${esc(trip.num || '')} → ${esc(trip.to || trip.stops.at(-1).name)}</h2>
     <div class="sub">${trip.extra ? '<b>Extrafahrt</b> (nicht im Fahrplan) · ' : ''}${esc(trip.op)}${trip.op ? ' · ' : ''}${where}${delay}${trip.canceled ? ' · <b class="delay-bad">fällt aus</b>' : ''}${trip.rt ? '' : ' · nur Fahrplan'}</div>
+    <div class="actions">
+      <button id="follow-btn" class="link-btn" type="button" aria-pressed="${follow}">${follow ? 'Verfolgen: an' : 'Verfolgen'}</button>
+      <button id="route-btn" class="link-btn" type="button">Ganze Strecke</button>
+    </div>
     <table><tr><td></td><td class="t">an</td><td class="t">ab</td></tr>${rows}</table>`;
   $('details').hidden = false;
   $('details').querySelector('.close').onclick = closeDetails;
+  $('follow-btn').onclick = () => {
+    setFollow(!follow);
+    const marker = trains.get(id)?.marker;
+    if (follow && marker) map.setView(marker.getLatLng(), Math.max(map.getZoom(), FOLLOW_ZOOM));
+  };
+  $('route-btn').onclick = () => {
+    setFollow(false);
+    map.fitBounds(line.getBounds(), { paddingTopLeft: [window.innerWidth > 600 ? 360 : 20, 40], paddingBottomRight: [40, 40] });
+  };
+  // Halt anklicken: dorthin springen
+  $('details').querySelector('table').onclick = (ev) => {
+    const row = ev.target.closest('tr.stop');
+    if (!row) return;
+    setFollow(false);
+    map.flyTo([Number(row.dataset.lat), Number(row.dataset.lon)], 16, { duration: 0.8 });
+  };
 }
 
 map.on('click', () => { if (selectedId) closeDetails(); });
