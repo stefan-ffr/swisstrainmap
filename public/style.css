@@ -64,3 +64,8 @@ html, body { margin: 0; height: 100%; font: 14px/1.4 system-ui, -apple-system, "
 #details .extras li:hover { background: color-mix(in srgb, var(--line) 50%, transparent); }
 #details .extras .t { font-variant-numeric: tabular-nums; }
 #details .extras .live { color: var(--ok); font-weight: 700; }
+
+#details .actions { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0; }
+#details .link-btn[aria-pressed="true"] { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+#details tr.stop { cursor: pointer; }
+#details tr.stop:hover td { background: color-mix(in srgb, var(--line) 50%, transparent); }
