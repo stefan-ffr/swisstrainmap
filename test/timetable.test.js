@@ -91,3 +91,13 @@ test('Fahrtdetails', () => {
   assert.equal(trip.stops[0].dep, at('05:05'));
   assert.equal(tt.trip('gibtsnicht|1', null), null);
 });
+
+test('nur Fahrten im Kartenausschnitt werden berechnet', () => {
+  const luzern = [47.0, 8.2, 47.1, 8.4]; // Süd, West, Nord, Ost
+  const all = tt.positions(at('05:40'), null);
+  const local = tt.positions(at('05:40'), null, { bbox: luzern });
+  assert.ok(local.length > 0 && local.length < all.length);
+  assert.ok(local.every((t) => t.name === 'IR70'), local.map((t) => t.name).join());
+  // Verkehrsmittel-Filter
+  assert.equal(tt.positions(at('05:40'), null, { modes: new Set(['bus']) }).length, 0);
+});

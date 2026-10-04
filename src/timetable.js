@@ -9,6 +9,9 @@ import { ROUTED_MODES } from './modes.js';
 const LOOKAHEAD = 3;
 // Puffer für verspätete Züge, die nach Fahrplan schon angekommen wären.
 const MAX_DELAY = 3 * 3600;
+// Rasterweite (Grad) des räumlichen Index für Abfragen nach Kartenausschnitt.
+const CELL = 0.05;
+const cellKey = (r, c) => r * 100000 + c;
 
 export class Timetable {
   constructor(data, timeZone, legStore = null) {
@@ -28,26 +31,73 @@ export class Timetable {
     }
     this.days = data.days.map((day) => {
       const active = data.services.get(day);
-      const list = [];
+      const byMode = new Map();
       for (const trip of data.trips.values()) {
         if (!active.has(trip.serviceId)) continue;
-        list.push({ trip, start: trip.dep[0], end: trip.arr[trip.arr.length - 1] });
+        const mode = trip.route.mode ?? 'rail';
+        if (!byMode.has(mode)) byMode.set(mode, []);
+        byMode.get(mode).push(trip);
       }
-      return { day, start: serviceDayStart(day, timeZone), list };
+      return { day, start: serviceDayStart(day, timeZone), active, byMode };
     });
+
+    // Räumlicher Index: Rasterzellen, die eine Fahrt zwischen zwei Halten
+    // berührt -> Fahrten. Damit werden für einen Kartenausschnitt nur die
+    // Fahrten betrachtet, die dort überhaupt vorbeikommen.
+    const { lat, lon } = data.stops;
+    this.grid = new Map();
+    for (const trip of data.trips.values()) {
+      const cells = new Set();
+      for (let k = 0; k < trip.stop.length; k++) {
+        const a = trip.stop[k], b = trip.stop[Math.min(k + 1, trip.stop.length - 1)];
+        const r0 = Math.floor(Math.min(lat[a], lat[b]) / CELL), r1 = Math.floor(Math.max(lat[a], lat[b]) / CELL);
+        const c0 = Math.floor(Math.min(lon[a], lon[b]) / CELL), c1 = Math.floor(Math.max(lon[a], lon[b]) / CELL);
+        if ((r1 - r0 + 1) * (c1 - c0 + 1) > 400) continue; // unplausibel langer Abschnitt (z. B. Nachtzug ins Ausland)
+        for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) cells.add(cellKey(r, c));
+      }
+      for (const key of cells) {
+        let list = this.grid.get(key);
+        if (!list) this.grid.set(key, (list = []));
+        list.push(trip);
+      }
+    }
   }
 
   covers(dayKey) {
     return this.days.some((d) => d.day === dayKey);
   }
 
-  /** Alle Fahrten, die zum Zeitpunkt nowMs unterwegs sein könnten. */
-  *candidates(nowMs) {
+  /** Fahrten der gewünschten Verkehrsmittel, die den Ausschnitt [s, w, n, e] berühren. */
+  tripsIn(bbox, modes) {
+    const seen = new Set();
+    const r0 = Math.floor(bbox[0] / CELL), r1 = Math.floor(bbox[2] / CELL);
+    const c0 = Math.floor(bbox[1] / CELL), c1 = Math.floor(bbox[3] / CELL);
+    if ((r1 - r0 + 1) * (c1 - c0 + 1) > 20000) return null; // Ausschnitt zu gross: kein Gewinn
+    for (let r = r0; r <= r1; r++) {
+      for (let c = c0; c <= c1; c++) {
+        for (const trip of this.grid.get(cellKey(r, c)) ?? []) {
+          if (!modes || modes.has(trip.route.mode ?? 'rail')) seen.add(trip);
+        }
+      }
+    }
+    return seen;
+  }
+
+  /**
+   * Alle Fahrten, die zum Zeitpunkt nowMs unterwegs sein könnten – optional
+   * nur bestimmte Verkehrsmittel (Set) und nur im Ausschnitt bbox.
+   */
+  *candidates(nowMs, { modes = null, bbox = null } = {}) {
+    const local = bbox ? this.tripsIn(bbox, modes) : null;
     for (const d of this.days) {
       const t = (nowMs - d.start) / 1000;
       if (t < -3600 || t > 2 * 86400) continue;
-      for (const c of d.list) {
-        if (c.start <= t && c.end + MAX_DELAY >= t) yield { trip: c.trip, day: d.day, dayStart: d.start, t };
+      const lists = local ? [local] : [...d.byMode].filter(([m]) => !modes || modes.has(m)).map(([, l]) => l);
+      for (const list of lists) {
+        for (const trip of list) {
+          if (local && !d.active.has(trip.serviceId)) continue;
+          if (trip.dep[0] <= t && trip.arr[trip.arr.length - 1] + MAX_DELAY >= t) yield { trip, day: d.day, dayStart: d.start, t };
+        }
       }
     }
   }
@@ -101,11 +151,17 @@ export class Timetable {
     return { A, D, arrDelay, depDelay, canceled: !!rt?.canceled };
   }
 
-  /** Liste aller fahrenden Züge mit Wegpunkten für die Animation im Browser. */
-  positions(nowMs, realtime) {
+  /**
+   * Fahrende Fahrzeuge mit Wegpunkten für die Animation im Browser.
+   * filter: { modes: Set, bbox: [s, w, n, e] } – berechnet werden nur Fahrten
+   * dieser Verkehrsmittel, die den Ausschnitt berühren.
+   */
+  positions(nowMs, realtime, filter = {}) {
     const { stops } = this.data;
+    const { bbox } = filter;
+    const inBox = (p) => !bbox || (p[0] >= bbox[0] && p[0] <= bbox[2] && p[1] >= bbox[1] && p[1] <= bbox[3]);
     const out = [];
-    for (const { trip, day, dayStart, t } of this.candidates(nowMs)) {
+    for (const { trip, day, dayStart, t } of this.candidates(nowMs, filter)) {
       const { A, D, depDelay, arrDelay, canceled } = this.expectedTimes(trip, day, dayStart, realtime);
       if (canceled) continue;
       const n = A.length;
@@ -124,6 +180,7 @@ export class Timetable {
         const s = trip.stop[j];
         points.push([stops.lat[s], stops.lon[s], dayStart + A[j] * 1000, dayStart + D[j] * 1000, trip.leg?.[j] ?? -1]);
       }
+      if (!points.some(inBox)) continue;
       const next = Math.min(n - 1, dwelling ? k : k + 1);
       const route = trip.route;
       out.push({

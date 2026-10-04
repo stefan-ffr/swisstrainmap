@@ -1,0 +1,32 @@
+# Betrieb auf einem Server: App + Caddy (automatisches HTTPS via Let's Encrypt).
+#   cp deploy/env.example .env   # Domain, API-Key, Verkehrsmittel eintragen
+#   docker compose up -d --build
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PORT: 8080
+    volumes:
+      - ./data:/app/data
+    expose:
+      - "8080"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+
+volumes:
+  caddy_data:
+  caddy_config:

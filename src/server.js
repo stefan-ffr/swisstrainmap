@@ -120,25 +120,32 @@ function serveStatic(pathname, res) {
   res.end('Not found');
 }
 
-let cache = { at: 0, body: null };
+const cache = new Map(); // Verkehrsmittel -> { at, trains }
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
   const tt = state.timetable;
 
   if (url.pathname === '/api/trains') {
-    // ?modes=rail,tram,…  &bbox=süd,west,nord,ost – ohne Angabe: alle Verkehrsmittel/ganzes Gebiet
+    // ?modes=rail,tram,…  &bbox=süd,west,nord,ost – berechnet werden nur Fahrten
+    // dieser Verkehrsmittel im Ausschnitt; ohne Angabe: alle, landesweit
     if (!tt) return sendJson(req, res, 503, { error: state.loadError || 'Fahrplan wird geladen …' });
     const now = Date.now();
-    if (now - cache.at > 2000) cache = { at: now, body: { now, trains: tt.positions(now, realtime) } };
-    const modes = url.searchParams.get('modes')?.split(',');
+    const modesParam = url.searchParams.get('modes') || '';
     const bbox = url.searchParams.get('bbox')?.split(',').map(Number);
-    const inBox = (t) => {
-      if (!bbox || bbox.length !== 4 || bbox.some(Number.isNaN)) return true;
-      return t.points.some(([lat, lon]) => lat >= bbox[0] && lat <= bbox[2] && lon >= bbox[1] && lon <= bbox[3]);
+    const filter = {
+      modes: modesParam ? new Set(modesParam.split(',')) : null,
+      bbox: bbox?.length === 4 && !bbox.some(Number.isNaN) ? bbox : null,
     };
-    const trains = cache.body.trains.filter((t) => (!modes || modes.includes(t.mode)) && inBox(t));
-    return sendJson(req, res, 200, { now: cache.body.now, trains, serverTime: now, legsVersion: legStore?.version ?? null });
+    // Landesweite Abfragen (z. B. alle Züge) sind für alle Besucher gleich: 2 s zwischenspeichern
+    const key = filter.bbox ? null : modesParam;
+    let trains;
+    if (key !== null && cache.get(key)?.at > now - 2000) trains = cache.get(key).trains;
+    else {
+      trains = tt.positions(now, realtime, filter);
+      if (key !== null) cache.set(key, { at: now, trains });
+    }
+    return sendJson(req, res, 200, { now, trains, serverTime: now, legsVersion: legStore?.version ?? null });
   }
   if (url.pathname.startsWith('/api/trip/')) {
     if (!tt) return sendJson(req, res, 503, { error: 'Fahrplan wird geladen …' });
