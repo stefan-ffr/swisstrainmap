@@ -12,25 +12,44 @@ const BBOX = '45.75,5.85,47.85,10.55';
 export const OVERPASS_QUERY = `[out:json][timeout:900][maxsize:2000000000];
 way["railway"~"^(rail|narrow_gauge|light_rail|funicular|tram|subway)$"]["service"!~"^(yard|spur)$"](${BBOX});
 out body qt; >; out skel qt;`;
+// Strassen, auf denen laut OSM-Linienverläufen (route=bus/trolleybus) Busse
+// fahren – viel kleiner als das ganze Strassennetz und genau die richtigen Wege.
+export const ROAD_QUERY = `[out:json][timeout:900][maxsize:2000000000];
+rel["route"~"^(bus|trolleybus)$"](${BBOX});
+way(r)["highway"];
+out body qt; >; out skel qt;`;
 
-const SNAP_RADIUS = 300;      // m: Gleise im Umkreis eines Halts als Start/Ziel
-const SNAP_FALLBACK = 2000;   // m: falls im Umkreis nichts liegt
-// Alle Gleispunkte im Umkreis: in Bahnhöfen mit mehreren Bahnen (z. B. Montreux:
-// SBB + MOB) lägen sonst die nächsten Kandidaten alle auf der falschen Bahn.
-const SNAP_MAX = 500;
-// Max. Richtungsänderung pro Knoten. Schlägt die strenge Suche fehl (z. B. wegen
-// ungenau gezeichneter Weichen in OSM), wird eine lockerere Grenze versucht.
-const TURN_LIMITS = [70, 110].map((deg) => Math.cos((deg * Math.PI) / 180));
-// Weg vom Haltepunkt zum Gleis zählt mehrfach, damit der Zug am Bahnhof startet
-// und nicht am Gleispunkt, der dem Ziel schon am nächsten liegt.
+const deg = (d) => Math.cos((d * Math.PI) / 180);
+
+/**
+ * Netz-Profile:
+ *  - snap: Umkreis (m), in dem Netzpunkte als Start/Ziel eines Halts gelten;
+ *    fallback: grösserer Umkreis, falls darin nichts liegt; max: so viele
+ *    Kandidaten. Bei Gleisen alle im Umkreis – in Bahnhöfen mit mehreren
+ *    Bahnen (z. B. Montreux: SBB + MOB) lägen die nächsten sonst alle auf der
+ *    falschen Bahn.
+ *  - turns: max. Richtungsänderung pro Knoten; schlägt die strenge Suche fehl
+ *    (z. B. ungenau gezeichnete Weichen), wird die nächste versucht. Züge
+ *    können an Weichen nicht umkehren; Busse biegen rechtwinklig ab, wenden
+ *    aber nicht.
+ *  - oneway: Einbahnstrassen beachten (ausser oneway:bus/psv=no).
+ */
+export const PROFILES = {
+  rail: { name: 'Gleisnetz', query: OVERPASS_QUERY, snap: 300, fallback: 2000, max: 500, turns: [70, 110].map(deg), oneway: false },
+  road: { name: 'Busnetz', query: ROAD_QUERY, snap: 80, fallback: 400, max: 60, turns: [150, 175].map(deg), oneway: true },
+};
+
+// Weg vom Haltepunkt zum Netz zählt mehrfach, damit das Fahrzeug am Halt
+// startet und nicht am Netzpunkt, der dem Ziel schon am nächsten liegt.
 const SNAP_WEIGHT = 3;
 const CELL = 0.003;           // Grad, Rasterweite des räumlichen Index
 
 /**
- * Lädt das Gleisnetz per Overpass, falls kein aktueller Cache existiert.
- * Die Server in urls werden der Reihe nach versucht.
+ * Lädt ein Netz (Gleise oder Busstrassen) per Overpass, falls kein aktueller
+ * Cache existiert. Die Server in urls werden der Reihe nach versucht.
  */
-export async function ensureRailOsm(urls, cacheFile, maxAgeDays, log = console.log) {
+export async function ensureRailOsm(urls, cacheFile, maxAgeDays, log = console.log, profile = PROFILES.rail) {
+  const OVERPASS_QUERY = profile.query;
   // Bei geänderter Abfrage (z. B. neue Gleisarten) neu laden
   const queryFile = `${cacheFile}.query`;
   const knownQuery = await fsp.readFile(queryFile, 'utf8').catch(() => null);
@@ -42,7 +61,7 @@ export async function ensureRailOsm(urls, cacheFile, maxAgeDays, log = console.l
   const errors = [];
   for (const url of urls) {
     try {
-      log(`Gleisnetz: lade OSM-Daten von ${url} …`);
+      log(`${profile.name}: lade OSM-Daten von ${url} …`);
       const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -56,14 +75,14 @@ export async function ensureRailOsm(urls, cacheFile, maxAgeDays, log = console.l
       if (/"remark"\s*:\s*"runtime error/.test(tail)) throw new Error('Overpass-Abfrage abgebrochen (runtime error)');
       await fsp.rename(tmp, cacheFile);
       await fsp.writeFile(queryFile, OVERPASS_QUERY);
-      log(`Gleisnetz: gespeichert unter ${cacheFile}`);
+      log(`${profile.name}: gespeichert unter ${cacheFile}`);
       return cacheFile;
     } catch (err) {
       errors.push(`${url}: ${err.message}`);
-      log(`Gleisnetz: ${url} fehlgeschlagen – ${err.message}`);
+      log(`${profile.name}: ${url} fehlgeschlagen – ${err.message}`);
     }
   }
-  throw new Error(`Gleisnetz-Download fehlgeschlagen (${errors.join('; ')})`);
+  throw new Error(`${profile.name}: Download fehlgeschlagen (${errors.join('; ')})`);
 }
 
 class Heap {
@@ -101,26 +120,57 @@ class Heap {
   }
 }
 
+/** Overpass-JSON ({ elements }) in Knoten und Wege umwandeln. */
+function fromElements(elements) {
+  const nodes = new Map(), ways = [];
+  for (const el of elements) {
+    if (el.type === 'node') nodes.set(el.id, [el.lat, el.lon]);
+    else if (el.type === 'way' && el.nodes) ways.push({ nodes: el.nodes, oneway: onewayOf(el.tags || {}) });
+  }
+  return { nodes, ways };
+}
+
+/** 1 = nur in Zeichenrichtung, -1 = nur entgegen, 0 = beide (Busse ausgenommen). */
+function onewayOf(tags) {
+  if (tags['oneway:bus'] === 'no' || tags['oneway:psv'] === 'no') return 0;
+  if (tags.oneway === '-1') return -1;
+  if (tags.oneway === 'yes' || tags.oneway === 'true' || tags.oneway === '1') return 1;
+  if (tags.junction === 'roundabout' && tags.oneway !== 'no') return 1;
+  return 0;
+}
+
 export class RailNetwork {
-  /** @param osm Overpass-JSON ({ elements: [...] }) */
-  constructor(osm) {
+  /**
+   * @param osm     Overpass-JSON ({ elements }) oder { nodes: Map(id -> [lat, lon]), ways: [{ nodes, oneway }] }
+   * @param profile Eintrag aus PROFILES
+   */
+  constructor(osm, profile = PROFILES.rail) {
+    this.profile = profile;
+    const { nodes, ways } = osm.elements ? fromElements(osm.elements) : osm;
     const index = new Map();
     const lat = [], lon = [];
-    for (const el of osm.elements) {
-      if (el.type !== 'node') continue;
-      index.set(el.id, lat.length);
-      lat.push(el.lat); lon.push(el.lon);
-    }
-    const n = lat.length;
+    const idx = (id) => {
+      let i = index.get(id);
+      if (i === undefined) {
+        const p = nodes.get(id);
+        if (!p) return undefined;
+        i = lat.length;
+        index.set(id, i);
+        lat.push(p[0]); lon.push(p[1]);
+      }
+      return i;
+    };
+    // pairs: a, b, Richtung (0 beide, 1 a->b, -1 b->a)
     const pairs = [];
-    for (const el of osm.elements) {
-      if (el.type !== 'way' || !el.nodes) continue;
-      for (let k = 1; k < el.nodes.length; k++) {
-        const a = index.get(el.nodes[k - 1]), b = index.get(el.nodes[k]);
+    for (const way of ways) {
+      const dir = profile.oneway ? way.oneway : 0;
+      for (let k = 1; k < way.nodes.length; k++) {
+        const a = idx(way.nodes[k - 1]), b = idx(way.nodes[k]);
         if (a === undefined || b === undefined || a === b) continue;
-        pairs.push(a, b);
+        pairs.push(a, b, dir);
       }
     }
+    const n = lat.length;
 
     this.lat = Float64Array.from(lat);
     this.lon = Float64Array.from(lon);
@@ -130,9 +180,12 @@ export class RailNetwork {
     this.x = this.lon.map((v) => v * this.kx);
     this.y = this.lat.map((v) => v * this.ky);
 
-    // CSR-Adjazenz mit gerichteten Kanten (jeder Gleisabschnitt in beide Richtungen)
+    // CSR-Adjazenz mit gerichteten Kanten (Abschnitte ohne Einbahn in beide Richtungen)
     const deg = new Int32Array(n + 1);
-    for (let k = 0; k < pairs.length; k += 2) { deg[pairs[k]]++; deg[pairs[k + 1]]++; }
+    for (let k = 0; k < pairs.length; k += 3) {
+      if (pairs[k + 2] >= 0) deg[pairs[k]]++;
+      if (pairs[k + 2] <= 0) deg[pairs[k + 1]]++;
+    }
     const offset = new Int32Array(n + 1);
     for (let i = 0; i < n; i++) offset[i + 1] = offset[i] + deg[i];
     const E = offset[n];
@@ -143,7 +196,10 @@ export class RailNetwork {
       src[e] = a; dst[e] = b;
       len[e] = Math.hypot(this.x[b] - this.x[a], this.y[b] - this.y[a]);
     };
-    for (let k = 0; k < pairs.length; k += 2) { add(pairs[k], pairs[k + 1]); add(pairs[k + 1], pairs[k]); }
+    for (let k = 0; k < pairs.length; k += 3) {
+      if (pairs[k + 2] >= 0) add(pairs[k], pairs[k + 1]);
+      if (pairs[k + 2] <= 0) add(pairs[k + 1], pairs[k]);
+    }
     Object.assign(this, { n, E, offset, src, dst, len });
 
     // Suchzustand (wird nach jeder Suche selektiv zurückgesetzt)
@@ -164,8 +220,8 @@ export class RailNetwork {
 
   cellKey(r, c) { return r * 100000 + c; }
 
-  /** Gleispunkte nahe (lat, lon) als [[knoten, distanz], …]. */
-  near(lat, lon, radius = SNAP_RADIUS) {
+  /** Netzpunkte nahe (lat, lon) als [[knoten, distanz], …]. */
+  near(lat, lon, radius = this.profile.snap) {
     const px = lon * this.kx, py = lat * this.ky;
     const r = Math.ceil(radius / (CELL * this.ky)) + 1;
     const cr = Math.floor(lat / CELL), cc = Math.floor(lon / CELL);
@@ -181,8 +237,8 @@ export class RailNetwork {
       }
     }
     found.sort((a, b) => a[1] - b[1]);
-    if (!found.length && radius < SNAP_FALLBACK) return this.near(lat, lon, SNAP_FALLBACK).slice(0, 5);
-    return found.slice(0, SNAP_MAX);
+    if (!found.length && radius < this.profile.fallback) return this.near(lat, lon, this.profile.fallback).slice(0, 5);
+    return found.slice(0, this.profile.max);
   }
 
   /**
@@ -190,7 +246,7 @@ export class RailNetwork {
    * oder null, wenn kein plausibler Weg gefunden wird.
    */
   route(a, b) {
-    for (const minCos of TURN_LIMITS) {
+    for (const minCos of this.profile.turns) {
       const path = this.search(a, b, minCos);
       if (path) return path;
     }
@@ -256,10 +312,59 @@ export class RailNetwork {
   }
 }
 
-export async function loadRailNetwork(file, log = console.log) {
+/**
+ * Liest eine Overpass-JSON-Datei zeilenweise, ohne sie ganz in den Speicher zu
+ * laden (das Busnetz ist ~190 MB). Erwartet die Formatierung von Overpass:
+ * ein Feld pro Zeile, Knoten-IDs eines Wegs je auf eigener Zeile.
+ */
+async function parseOverpassFile(file) {
+  const readline = await import('node:readline');
+  const rl = readline.createInterface({ input: fs.createReadStream(file), crlfDelay: Infinity });
+  const nodes = new Map(), ways = [];
+  let el = null, inNodes = false, inTags = false;
+  const field = (line) => {
+    const m = /^\s*"([^"]+)":\s*(.*?),?\s*$/.exec(line);
+    return m ? [m[1], m[2]] : null;
+  };
+  const unquote = (v) => (v.startsWith('"') ? JSON.parse(v) : v);
+  for await (const line of rl) {
+    if (inNodes) {
+      if (line.includes(']')) inNodes = false;
+      else el.nodes.push(Number(line.trim().replace(/,$/, '')));
+      continue;
+    }
+    if (inTags) {
+      if (/^\s*}/.test(line)) { inTags = false; continue; }
+      const f = field(line);
+      if (f) el.tags[f[0]] = unquote(f[1]);
+      continue;
+    }
+    const t = line.trim();
+    if (t === '{') { el = { tags: {} }; continue; }
+    if (t === '}' || t === '},') {
+      if (el?.type === 'node') nodes.set(el.id, [el.lat, el.lon]);
+      else if (el?.type === 'way' && el.nodes) ways.push({ nodes: el.nodes, oneway: onewayOf(el.tags) });
+      el = null;
+      continue;
+    }
+    if (!el) continue;
+    const f = field(line);
+    if (!f) continue;
+    const [k, v] = f;
+    if (k === 'nodes') { el.nodes = []; inNodes = !v.includes(']'); }
+    else if (k === 'tags') inTags = true;
+    else if (k === 'type') el.type = unquote(v);
+    else if (k === 'id') el.id = Number(v);
+    else if (k === 'lat') el.lat = Number(v);
+    else if (k === 'lon') el.lon = Number(v);
+  }
+  return { nodes, ways };
+}
+
+export async function loadRailNetwork(file, log = console.log, profile = PROFILES.rail) {
   const t0 = Date.now();
-  const net = new RailNetwork(JSON.parse(await fsp.readFile(file, 'utf8')));
-  log(`Gleisnetz: ${net.n.toLocaleString('de-CH')} Knoten, ${(net.E / 2).toLocaleString('de-CH')} Abschnitte `
+  const net = new RailNetwork(await parseOverpassFile(file), profile);
+  log(`${profile.name}: ${net.n.toLocaleString('de-CH')} Knoten, ${net.E.toLocaleString('de-CH')} gerichtete Abschnitte `
     + `in ${((Date.now() - t0) / 1000).toFixed(1)} s`);
   return net;
 }
