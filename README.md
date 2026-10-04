@@ -19,8 +19,10 @@ bekannten Zugradar-Karten – **berechnet**:
 2. Alle 35 s holt er GTFS-RT Trip Updates und rechnet die Verspätungen auf die Halte der Fahrt um
    (Verspätungen werden auf nachfolgende Halte übertragen, ausgefallene Fahrten ausgeblendet).
    Zusatzfahrten, die nur im Echtzeit-Feed stehen (kurzfristige Extrazüge, Ersatzbusse, Verstärkungskurse),
-   werden aus den Halten und Zeiten des Feeds aufgebaut und als „Extrafahrt“ angezeigt. Güterzüge sind in
-   keinen offenen Daten enthalten.
+   werden aus den Halten und Zeiten des Feeds aufgebaut und als „Extrafahrt“ angezeigt. Weil GTFS-RT eine
+   Fahrt nur enthält, solange sie läuft, protokolliert der Server jede Extrafahrt (`data/extras.json`, zwei
+   Tage); die Liste „Extrafahrten heute“ zeigt auch bereits beendete. Güterzüge sind in keinen offenen Daten
+   enthalten.
 3. Das Gleisnetz der Schweiz wird aus OpenStreetMap geladen (`railway=rail|narrow_gauge|light_rail|funicular`,
    ohne Rangiergleise). Für jedes Paar aufeinanderfolgender Halte sucht der Server per A* den Weg über die
    Gleise – über gerichtete Gleisabschnitte, sodass Züge an Weichen nicht „umkehren“ (max. 70° Richtungsänderung
@@ -125,6 +127,7 @@ Fahrplan und Prognose.
 | `GTFS_RT_API_KEY` | – | API-Key für GTFS-RT |
 | `GTFS_RT_ENABLED` | – | `1` = GTFS-RT auch ohne `GTFS_RT_API_KEY` abfragen (wenn ein Proxy den `Authorization`-Header ergänzt) |
 | `GTFS_RT_INTERVAL` | `35` | Abfrageintervall GTFS-RT in Sekunden (Minimum 12; beim Plan mit 5 Abfragen/min z. B. `15`) |
+| `EXTRAS_FILE` | `data/extras.json` | Protokoll der Extrafahrten (letzte 2 Tage) |
 | `GTFS_RT_CACHE_FILE` | `data/gtfs-rt.pb` | Letzter GTFS-RT-Feed (für Neustarts) |
 | `RAIL_ROUTING` | `1` | `0` = Gleisnetz nicht verwenden (Luftlinie) |
 | `RAIL_OSM_PATH` | – | Lokale Overpass-JSON-Datei mit dem Gleisnetz (statt Download) |
@@ -144,6 +147,7 @@ Fahrplan und Prognose.
 - `GET /api/legs?ids=1,2,…` – Geometrie der Streckenabschnitte als Google-Polyline (`""` = Luftlinie,
   `null` = wird noch berechnet)
 - `GET /api/trip/<tripId>|<YYYYMMDD>` – Halteliste mit Soll- und Prognosezeiten und Streckenverlauf
+- `GET /api/extras?day=YYYYMMDD` – Protokoll der Extrafahrten eines Tages (Standard: heute), auch beendete
 - `GET /api/status` – Zustand von Fahrplan- und Echtzeit-Import
 
 ## Projektstruktur

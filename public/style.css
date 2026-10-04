@@ -56,3 +56,11 @@ html, body { margin: 0; height: 100%; font: 14px/1.4 system-ui, -apple-system, "
 @media (max-width: 600px) {
   #panel { top: auto; bottom: 0; left: 0; width: 100%; max-height: 45%; border-radius: 10px 10px 0 0; }
 }
+
+.link-btn { align-self: flex-start; padding: 4px 10px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--fg); font: 600 12px system-ui, sans-serif; cursor: pointer; }
+.link-btn:hover { border-color: var(--muted); }
+#details .extras { list-style: none; margin: 0; padding: 0; font-size: 12px; }
+#details .extras li { padding: 5px 2px; border-bottom: 1px solid var(--line); cursor: pointer; display: grid; grid-template-columns: 3.2em 1fr auto; gap: 6px; align-items: baseline; }
+#details .extras li:hover { background: color-mix(in srgb, var(--line) 50%, transparent); }
+#details .extras .t { font-variant-numeric: tabular-nums; }
+#details .extras .live { color: var(--ok); font-weight: 700; }

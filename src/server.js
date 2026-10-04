@@ -12,6 +12,7 @@ import { Timetable } from './timetable.js';
 import { RealtimeStore } from './realtime.js';
 import { todayKey } from './time.js';
 import { LegStore } from './legs.js';
+import { ExtraLog } from './extras.js';
 import { ensureRailOsm, loadRailNetwork, PROFILES } from './rail-network.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -19,6 +20,18 @@ const log = (msg) => console.log(`[${new Date().toISOString()}] ${msg}`);
 
 const state = { timetable: null, loading: false, loadedAt: null, loadError: null };
 const realtime = new RealtimeStore();
+const extraLog = new ExtraLog(path.resolve(root, config.extrasFile), log);
+const extraLogLoaded = extraLog.load();
+
+/** Extrafahrten aus dem neuesten GTFS-RT-Stand ins Protokoll übernehmen. */
+async function recordExtras() {
+  const tt = state.timetable;
+  if (!tt) return;
+  await extraLogLoaded;
+  tt.refreshAdded(realtime);
+  extraLog.prune(todayKey(Date.now(), config.timeZone));
+  extraLog.record(tt.added.values(), (trip) => tt.expectedTimes(trip, trip.day, trip.dayStart, realtime), tt.data.stops);
+}
 const networks = [config.railRouting && 'rail', config.roadRouting && 'road'].filter(Boolean);
 const legStore = networks.length ? new LegStore(path.resolve(root, config.railLegsCacheFile), log, networks) : null;
 const NETWORK_SOURCES = {
@@ -61,6 +74,7 @@ async function reload() {
       });
       await legCacheLoaded;
       state.timetable = new Timetable(data, config.timeZone, legStore);
+      recordExtras().catch((err) => log(`Extrafahrten: ${err.message}`));
       state.loadedAt = new Date().toISOString();
       state.loadError = null;
     } finally {
@@ -173,6 +187,11 @@ const server = http.createServer((req, res) => {
     }
     return sendJson(req, res, 200, { version: legStore?.version ?? null, legs: out });
   }
+  if (url.pathname === '/api/extras') {
+    // Extrafahrten eines Betriebstags (Standard: heute), auch bereits beendete
+    const day = Number(url.searchParams.get('day')) || todayKey(Date.now(), config.timeZone);
+    return sendJson(req, res, 200, { day, extras: extraLog.forDay(day) });
+  }
   if (url.pathname === '/api/status') {
     return sendJson(req, res, 200, {
       timetable: {
@@ -194,5 +213,6 @@ realtime.start({
   intervalSeconds: config.rtIntervalSeconds,
   cacheFile: path.resolve(root, config.rtCacheFile),
   log,
+  onUpdate: () => recordExtras().catch((err) => log(`Extrafahrten: ${err.message}`)),
 });
 reload();

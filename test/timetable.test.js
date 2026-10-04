@@ -9,6 +9,7 @@ import { openGtfs } from '../src/gtfs-source.js';
 import { loadGtfs } from '../src/gtfs-loader.js';
 import { Timetable } from '../src/timetable.js';
 import { RealtimeStore } from '../src/realtime.js';
+import { ExtraLog } from '../src/extras.js';
 import { serviceDayStart, parseGtfsTime, addDays } from '../src/time.js';
 
 const TZ = 'Europe/Zurich';
@@ -129,4 +130,43 @@ test('Zusatzfahrt aus GTFS-RT (Extrazug) erscheint mit Halten, Zeiten und Versp√
   assert.equal(detail.stops[0].depRt, at('06:02'));
   // vor der Abfahrt nicht sichtbar
   assert.equal(tt.positions(at('05:59'), rt).find((t) => t.extra), undefined);
+});
+
+test('Protokoll der Extrafahrten: bleibt nach Ende der Fahrt und nach Neustart erhalten', async () => {
+  const sec = (hhmm) => Math.round(at(hhmm) / 1000);
+  const rt = new RealtimeStore();
+  rt.ingestBuffer(feed([{
+    id: 'x',
+    tripUpdate: {
+      trip: { tripId: 'ojp:extra:sjyid:100001:39002-001', startDate: String(DAY), scheduleRelationship: 'ADDED' },
+      stopTimeUpdate: [
+        { stopSequence: 1, stopId: 'BS', departure: { time: sec('20:51') } },
+        { stopSequence: 2, stopId: 'OL', arrival: { time: sec('21:16'), delay: 60 } },
+      ],
+    },
+  }]));
+  tt.refreshAdded(rt);
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'extras-')), 'extras.json');
+  const logA = new ExtraLog(file, () => {});
+  const expected = (trip) => tt.expectedTimes(trip, trip.day, trip.dayStart, rt);
+  logA.record(tt.added.values(), expected, tt.data.stops, 1000);
+  logA.record(tt.added.values(), expected, tt.data.stops, 2000);
+  // Fahrt ist beendet und nicht mehr im Feed: Eintrag bleibt
+  rt.ingestBuffer(feed([]));
+  tt.refreshAdded(rt);
+  logA.record(tt.added.values(), expected, tt.data.stops, 3000);
+  const [e] = logA.forDay(DAY);
+  assert.equal(e.num, '39002');
+  assert.equal(e.from, 'Basel SBB');
+  assert.equal(e.to, 'Olten');
+  assert.equal(e.dep, at('20:51'));
+  assert.equal(e.firstSeen, 1000);
+  assert.equal(e.lastSeen, 2000);
+  assert.equal(e.stops[1].arrRt - e.stops[1].arr, 60_000);
+  await logA.saving;
+  const logB = new ExtraLog(file, () => {});
+  await logB.load();
+  assert.deepEqual(logB.forDay(DAY), [e]);
+  logB.prune(20261010); // eine Woche sp√§ter: weg
+  assert.equal(logB.forDay(DAY).length, 0);
 });

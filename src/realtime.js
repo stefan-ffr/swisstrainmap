@@ -83,7 +83,7 @@ export class RealtimeStore {
    * wird gewartet, und der letzte Feed wird in cacheFile gespeichert, damit ein
    * Neustart weder ohne Daten dasteht noch das Limit sofort wieder anfragt.
    */
-  async start({ url, apiKey, enabled = false, intervalSeconds, cacheFile, log = console.log }) {
+  async start({ url, apiKey, enabled = false, intervalSeconds, cacheFile, log = console.log, onUpdate = () => {} }) {
     if (!apiKey && !enabled) {
       log('GTFS-RT: kein API-Key (GTFS_RT_API_KEY) – Karte zeigt Sollpositionen nach Fahrplan.');
       return;
@@ -100,6 +100,7 @@ export class RealtimeStore {
         this.status.lastSuccess = stat.mtime.toISOString();
         wait = Math.max(0, stat.mtimeMs + interval - Date.now());
         log(`GTFS-RT: ${this.status.trips} Fahrten aus Cache geladen`);
+        onUpdate();
       } catch { /* kein (gültiger) Cache */ }
     }
 
@@ -122,6 +123,7 @@ export class RealtimeStore {
         if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
         const buffer = Buffer.from(await res.arrayBuffer());
         this.ingestBuffer(buffer);
+        onUpdate();
         if (cacheFile) {
           await fsp.mkdir(path.dirname(cacheFile), { recursive: true });
           await fsp.writeFile(cacheFile, buffer);
