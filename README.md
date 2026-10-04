@@ -57,8 +57,27 @@ docker run -p 8080:8080 -v "$(pwd)/data:/app/data" -e GTFS_RT_API_KEY=<dein-key>
 
 ### Betrieb auf einem VPS (Docker + automatisches HTTPS)
 
-Voraussetzungen: Docker mit Compose-Plugin, Ports 80 und 443 frei, ein DNS-Eintrag (A/AAAA) der Domain auf den
-Server. Mit allen Verkehrsmitteln braucht der Server im Betrieb rund 1,4 GB RAM und beim einmaligen Erstellen
+**Einzeiler** (als root oder mit sudo, auf Debian/Ubuntu, Fedora/RHEL/Rocky/Alma oder Alpine):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/stefan-ffr/swisstrainmap/main/deploy/install.sh | bash
+```
+
+Ohne curl (z. B. Debian minimal): `wget -qO- https://raw.githubusercontent.com/stefan-ffr/swisstrainmap/main/deploy/install.sh | bash`
+
+Das Skript [`deploy/install.sh`](deploy/install.sh)
+1. installiert fehlende Pakete: git, curl, CA-Zertifikate sowie Docker mit Compose-Plugin (über das offizielle
+   Skript von get.docker.com, auf Alpine über apk),
+2. lädt den Code nach `~/swisstrainmap` (bzw. aktualisiert ihn bei erneutem Aufruf),
+3. fragt die Domain und den GTFS-RT-API-Key ab – der Key wird bei der Eingabe nicht angezeigt, mit einer
+   einzelnen Abfrage geprüft und in `.env` (nur für den Besitzer lesbar) gespeichert,
+4. startet App und Caddy mit `docker compose up -d --build`.
+
+Erneut ausführen aktualisiert die Installation; mit Enter bleibt der bisherige Key erhalten. Ohne Rückfragen:
+`DOMAIN=… GTFS_RT_API_KEY=… bash install.sh`. Weitere Variablen: `INSTALL_DIR`, `BRANCH`.
+
+**Von Hand:** Voraussetzungen sind Docker mit Compose-Plugin, die Ports 80 und 443 und ein DNS-Eintrag (A/AAAA)
+der Domain auf den Server. Mit allen Verkehrsmitteln braucht der Server im Betrieb rund 1,4 GB RAM und beim einmaligen Erstellen
 des Auszugs pro Fahrplan-Version kurz rund 1,6 GB; ein VPS mit 4 GB reicht gut. Auf der Festplatte belegen
 Fahrplan, Auszug und Gleisnetz zusammen etwa 1,5 GB in `./data`.
 
