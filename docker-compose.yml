@@ -8,6 +8,8 @@ services:
     env_file: .env
     environment:
       PORT: 8080
+      # Auszug erstellen braucht kurz ~1,6 GB; Node-Heap nicht vom Standard begrenzen lassen
+      NODE_OPTIONS: --max-old-space-size=2560
     volumes:
       - ./data:/app/data
     expose:
