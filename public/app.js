@@ -364,7 +364,7 @@ async function showDetails(id, fit) {
     const cur = live && (live.at === s.name || (!live.at && live.next === s.name));
     const cell = (plan, rt) => {
       if (plan == null) return '';
-      const d = rt - plan;
+      const d = (rt - plan) / 1000; // Zeiten in ms, Verspätung in s
       const extra = trip.rt && Math.abs(d) >= 60 ? ` <span class="${delayClass(d)}">${delayText(d)}</span>` : '';
       return fmtTime(plan) + extra;
     };
