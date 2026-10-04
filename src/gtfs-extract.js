@@ -1,7 +1,11 @@
-// Erstellt einmal pro Fahrplan-Version einen Auszug nur mit Bahnfahrten.
-// Der Landesfahrplan enthält ~42 Mio. Haltezeiten (Bus, Tram, Schiff …),
-// davon sind nur ~10 % Bahn – Starts und Tageswechsel lesen dann nur noch den
-// Auszug statt der ganzen ZIP-Datei.
+// Erstellt einmal pro Fahrplan-Version einen Auszug des Landesfahrplans für die
+// gewünschten Verkehrsmittel (route_types). Der Auszug ist so aufgebaut, dass
+// Starts und Tageswechsel schnell gehen:
+//  - service_days.txt: Verkehrstage als Bitmaske statt calendar(_dates).txt
+//    (im Schweizer Feed allein 11 Mio. Ausnahme-Zeilen),
+//  - stop_times.idx: pro Zeile in trips.txt Byte-Position und -Länge der
+//    zugehörigen Haltezeiten in stop_times.txt; der Loader liest damit nur die
+//    Fahrten der benötigten Tage statt aller ~42 Mio. Zeilen.
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
@@ -10,14 +14,21 @@ import { readCsv, parseLine } from './csv.js';
 import { openGtfs } from './gtfs-source.js';
 import { addDays, weekday } from './time.js';
 
-const VERSION = 2;
+const VERSION = 3;
 const stripBom = (line) => line.replace(/^﻿/, '');
 
 // Schreibt synchron aus dem CSV-Callback; die Festplatte ist schneller als das
 // Parsen, daher bleibt der Puffer des Streams klein.
 class Writer {
-  constructor(file) { this.out = fs.createWriteStream(file); }
-  line(text) { this.out.write(`${text}\n`); }
+  constructor(file) {
+    this.out = fs.createWriteStream(file);
+    this.bytes = 0;
+  }
+  line(text) {
+    const s = `${text}\n`;
+    this.bytes += Buffer.byteLength(s);
+    this.out.write(s);
+  }
   async close() {
     this.out.end();
     await once(this.out, 'finish');
@@ -47,12 +58,12 @@ const dayNumber = (key) => Date.UTC(Math.floor(key / 10000), Math.floor(key / 10
 /**
  * Ersetzt calendar.txt + calendar_dates.txt durch service_days.txt: pro
  * service_id eine Bitmaske der Verkehrstage (Hex, Bit k = start_date + k Tage).
- * Im Schweizer Feed sind das 57 000 Bahn-Kalender mit 9 Mio. Ausnahmen
- * (236 MB) – als Bitmaske nur wenige MB.
+ * Zwei Durchgänge über calendar_dates.txt (Datumsbereich, dann Ausnahmen
+ * anwenden), damit die Millionen Ausnahmen nie gleichzeitig im Speicher liegen.
  */
 async function writeServiceDays(src, outDir, services) {
-  const calendars = [], exceptions = [];
   let min = Infinity, max = -Infinity;
+  const calendars = [];
   if (src.has('calendar.txt')) {
     await readCsv(await src.open('calendar.txt'), (r, i) => {
       if (!services.has(r[i.service_id])) return;
@@ -63,16 +74,16 @@ async function writeServiceDays(src, outDir, services) {
   }
   if (src.has('calendar_dates.txt')) {
     await readCsv(await src.open('calendar_dates.txt'), (r, i) => {
-      if (!services.has(r[i.service_id])) return;
       const date = Number(r[i.date]);
-      exceptions.push([r[i.service_id], date, r[i.exception_type] === '1']);
-      min = Math.min(min, date); max = Math.max(max, date);
+      if (date < min || date > max) {
+        if (!services.has(r[i.service_id])) return;
+        min = Math.min(min, date); max = Math.max(max, date);
+      }
     });
   }
   if (!Number.isFinite(min)) return;
   const first = dayNumber(min);
-  const length = dayNumber(max) - first + 1;
-  const bytes = Math.ceil(length / 8);
+  const bytes = Math.ceil((dayNumber(max) - first + 1) / 8);
   const masks = new Map();
   const mask = (id) => {
     let m = masks.get(id);
@@ -87,9 +98,14 @@ async function writeServiceDays(src, outDir, services) {
       m[k >> 3] |= 1 << (k & 7);
     }
   }
-  for (const [id, date, add] of exceptions) {
-    const m = mask(id), k = dayNumber(date) - first;
-    if (add) m[k >> 3] |= 1 << (k & 7); else m[k >> 3] &= ~(1 << (k & 7));
+  calendars.length = 0;
+  if (src.has('calendar_dates.txt')) {
+    await readCsv(await src.open('calendar_dates.txt'), (r, i) => {
+      const id = r[i.service_id];
+      if (!services.has(id)) return;
+      const m = mask(id), k = dayNumber(Number(r[i.date])) - first;
+      if (r[i.exception_type] === '1') m[k >> 3] |= 1 << (k & 7); else m[k >> 3] &= ~(1 << (k & 7));
+    });
   }
   const w = new Writer(path.join(outDir, 'service_days.txt'));
   w.line('service_id,start_date,days');
@@ -97,14 +113,14 @@ async function writeServiceDays(src, outDir, services) {
   await w.close();
 }
 
-export async function ensureRailExtract(sourceFile, outDir, routeTypes, log = console.log) {
+export async function ensureExtract(sourceFile, outDir, routeTypes, log = console.log) {
   const stat = await fsp.stat(sourceFile);
   const meta = {
     version: VERSION,
     source: path.resolve(sourceFile),
     size: stat.isDirectory() ? 0 : stat.size,
     mtimeMs: Math.round(stat.mtimeMs),
-    routeTypes: [...routeTypes].sort((a, b) => a - b),
+    modes: routeTypes.modes ?? [...routeTypes].sort((a, b) => a - b),
   };
   try {
     const old = JSON.parse(await fsp.readFile(path.join(outDir, 'meta.json'), 'utf8'));
@@ -112,7 +128,7 @@ export async function ensureRailExtract(sourceFile, outDir, routeTypes, log = co
   } catch { /* noch kein Auszug */ }
 
   const t0 = Date.now();
-  log('GTFS: erstelle Bahn-Auszug (einmal pro Fahrplan-Version) …');
+  log('GTFS: erstelle Auszug (einmal pro Fahrplan-Version) …');
   const tmp = `${outDir}.tmp`;
   await fsp.rm(tmp, { recursive: true, force: true });
   await fsp.mkdir(tmp, { recursive: true });
@@ -125,29 +141,51 @@ export async function ensureRailExtract(sourceFile, outDir, routeTypes, log = co
       return true;
     });
 
-    const trips = new Set(), services = new Set();
+    // trip_id -> Zeilennummer im Auszug (für den Index)
+    const trips = new Map(), services = new Set();
     await filterFile(src, 'trips.txt', tmp, (r, i) => {
       if (!routes.has(r[i.route_id])) return false;
-      trips.add(r[i.trip_id]);
+      trips.set(r[i.trip_id], trips.size);
       services.add(r[i.service_id]);
       return true;
     });
 
-    // stop_times ist riesig: Zeilen nur zerlegen, wenn die Fahrt eine Bahnfahrt ist
+    // stop_times: Zeilen nur zerlegen, wenn die Fahrt im Auszug ist; Position merken
+    const offset = new Float64Array(trips.size).fill(-1);
+    const length = new Uint32Array(trips.size);
+    let contiguous = true, current = -1;
     const stops = new Set();
     const w = new Writer(path.join(tmp, 'stop_times.txt'));
     let tripCol = 0, stopCol = 0, kept = 0;
     await readCsv(await src.open('stop_times.txt'), (_, idx, line) => {
       const id = tripCol === 0 ? firstField(line) : parseLine(line)[tripCol];
-      if (!trips.has(id)) return;
+      const k = trips.get(id);
+      if (k === undefined) return;
+      if (k !== current) {
+        if (offset[k] >= 0) contiguous = false; // Fahrt taucht ein zweites Mal auf
+        offset[k] = w.bytes;
+        current = k;
+      }
       stops.add(parseLine(line)[stopCol]);
+      const before = w.bytes;
       w.line(line);
+      length[k] += w.bytes - before;
       kept++;
     }, {
       parse: false,
       onHeader: (line, idx) => { tripCol = idx.trip_id; stopCol = idx.stop_id; w.line(stripBom(line)); },
     });
     await w.close();
+    if (contiguous) {
+      const idx = Buffer.alloc(trips.size * 12);
+      for (let k = 0; k < trips.size; k++) {
+        idx.writeDoubleLE(offset[k], k * 12);
+        idx.writeUInt32LE(length[k], k * 12 + 8);
+      }
+      await fsp.writeFile(path.join(tmp, 'stop_times.idx'), idx);
+    } else {
+      log('GTFS: stop_times.txt ist nicht nach Fahrten gruppiert – Auszug ohne Index');
+    }
 
     // Halte inkl. übergeordneter Stationen (für Namen)
     const parents = new Set();
@@ -162,7 +200,7 @@ export async function ensureRailExtract(sourceFile, outDir, routeTypes, log = co
     await fsp.writeFile(path.join(tmp, 'meta.json'), JSON.stringify(meta));
     await fsp.rm(outDir, { recursive: true, force: true });
     await fsp.rename(tmp, outDir);
-    log(`GTFS: Bahn-Auszug mit ${trips.size.toLocaleString('de-CH')} Fahrten und `
+    log(`GTFS: Auszug mit ${trips.size.toLocaleString('de-CH')} Fahrten und `
       + `${kept.toLocaleString('de-CH')} Haltezeiten in ${((Date.now() - t0) / 1000).toFixed(1)} s erstellt`);
     return outDir;
   } finally {

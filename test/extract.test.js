@@ -5,7 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { openGtfs } from '../src/gtfs-source.js';
 import { loadGtfs } from '../src/gtfs-loader.js';
-import { ensureRailExtract } from '../src/gtfs-extract.js';
+import { ensureExtract } from '../src/gtfs-extract.js';
+import { modeFilter, ALL_MODES } from '../src/modes.js';
 
 function writeFeed(dir) {
   const files = {
@@ -24,18 +25,22 @@ function writeFeed(dir) {
   for (const [name, content] of Object.entries(files)) fs.writeFileSync(path.join(dir, name), content);
 }
 
-async function load(dir, centerDay) {
+async function loadData(dir, centerDay, modes = ['rail']) {
   const src = await openGtfs(dir);
-  const data = await loadGtfs(src, { routeTypes: new Set([2, 102]), centerDay, log: () => {} });
+  return loadGtfs(src, { routeTypes: modeFilter(modes), centerDay, log: () => {} });
+}
+async function load(dir, centerDay) {
+  const data = await loadData(dir, centerDay);
   return Object.fromEntries([...data.services].map(([d, s]) => [d, [...s].sort()]));
 }
+const times = (data) => Object.fromEntries([...data.trips].map(([id, t]) => [id, [t.route.mode, [...t.arr], [...t.dep]]]));
 
 test('Bahn-Auszug liefert dieselben Verkehrstage und nur Bahnfahrten', async () => {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'extract-'));
   const feed = path.join(base, 'feed');
   fs.mkdirSync(feed);
   writeFeed(feed);
-  const extract = await ensureRailExtract(feed, path.join(base, 'rail'), new Set([2, 102]), () => {});
+  const extract = await ensureExtract(feed, path.join(base, 'rail'), modeFilter(['rail']), () => {});
 
   assert.ok(fs.existsSync(path.join(extract, 'service_days.txt')));
   assert.ok(!fs.readFileSync(path.join(extract, 'trips.txt'), 'utf8').includes('BUS'));
@@ -48,4 +53,18 @@ test('Bahn-Auszug liefert dieselben Verkehrstage und nur Bahnfahrten', async () 
   assert.deepEqual(await load(extract, 20261004), {
     20261003: ['ONLY', 'WE'], 20261004: ['WD', 'WE'], 20261005: [],
   });
+});
+
+test('Auszug mit allen Verkehrsmitteln: Index liefert dieselben Fahrten wie das Original', async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'extract-all-'));
+  const feed = path.join(base, 'feed');
+  fs.mkdirSync(feed);
+  writeFeed(feed);
+  const extract = await ensureExtract(feed, path.join(base, 'all'), modeFilter(ALL_MODES), () => {});
+  assert.ok(fs.existsSync(path.join(extract, 'stop_times.idx')));
+  const viaIndex = times(await loadData(extract, 20261006, ALL_MODES));
+  const original = times(await loadData(feed, 20261006, ALL_MODES));
+  assert.deepEqual(viaIndex, original);
+  assert.equal(viaIndex.BUS[0], 'bus');
+  assert.equal(viaIndex.T2[0], 'rail');
 });

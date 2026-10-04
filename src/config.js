@@ -1,4 +1,6 @@
 // Zentrale Konfiguration – alles über Umgebungsvariablen überschreibbar.
+import { ALL_MODES, modeFilter } from './modes.js';
+
 const env = process.env;
 
 function list(value) {
@@ -16,8 +18,6 @@ export const config = {
   gtfsCacheFile: env.GTFS_CACHE_FILE || 'data/gtfs.zip',
   // So oft wird geprüft, ob es eine neue Fahrplan-Version gibt.
   gtfsMaxAgeHours: Number(env.GTFS_MAX_AGE_HOURS || 6),
-  // Auszug nur mit Bahnfahrten (wird pro Fahrplan-Version einmal erstellt).
-  gtfsExtractDir: env.GTFS_EXTRACT_DIR || 'data/gtfs-rail',
 
   // GTFS-RT (Trip Updates). Ohne API-Key läuft die Karte rein nach Fahrplan.
   rtUrl: env.GTFS_RT_URL || 'https://api.opentransportdata.swiss/la/gtfs-rt',
@@ -28,9 +28,6 @@ export const config = {
   // 35 s passt mit Reserve zu beiden (Minimum 12 s).
   rtIntervalSeconds: Number(env.GTFS_RT_INTERVAL || 35),
   rtCacheFile: env.GTFS_RT_CACHE_FILE || 'data/gtfs-rt.pb',
-
-  // GTFS route_type, die als "Zug" gelten (2 = Rail, 100–117 = Extended Rail).
-  routeTypes: new Set(list(env.ROUTE_TYPES || '2,100,101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117').map(Number)),
 
   // Gleisnetz aus OpenStreetMap, damit Züge den Strecken entlang fahren.
   railRouting: env.RAIL_ROUTING !== '0',
@@ -45,6 +42,11 @@ export const config = {
 
   // Fahrten ohne Halt in diesem Gebiet (Süd, West, Nord, Ost) werden ignoriert.
   bbox: list(env.BBOX || '45.75,5.85,47.85,10.55').map(Number),
+
+  // Verkehrsmittel: rail, tram, metro, bus, ship, cable, funicular
+  routeTypes: modeFilter(list(env.MODES || ALL_MODES.join(','))),
+  // Auszug des Fahrplans (wird pro Fahrplan-Version und Auswahl einmal erstellt).
+  gtfsExtractDir: env.GTFS_EXTRACT_DIR || 'data/gtfs-extract',
 
   timeZone: env.TZ_FEED || 'Europe/Zurich',
 };

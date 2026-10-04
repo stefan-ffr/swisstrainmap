@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
 import { openGtfs, ensureDownloaded } from './gtfs-source.js';
 import { loadGtfs } from './gtfs-loader.js';
-import { ensureRailExtract } from './gtfs-extract.js';
+import { ensureExtract } from './gtfs-extract.js';
 import { Timetable } from './timetable.js';
 import { RealtimeStore } from './realtime.js';
 import { todayKey } from './time.js';
@@ -39,7 +39,7 @@ async function reload() {
   try {
     const file = config.gtfsPath
       || await ensureDownloaded(config.gtfsUrl, path.resolve(root, config.gtfsCacheFile), config.gtfsMaxAgeHours, log);
-    const extract = await ensureRailExtract(path.resolve(root, file), path.resolve(root, config.gtfsExtractDir), config.routeTypes, log);
+    const extract = await ensureExtract(path.resolve(root, file), path.resolve(root, config.gtfsExtractDir), config.routeTypes, log);
     const src = await openGtfs(extract);
     try {
       const data = await loadGtfs(src, {
@@ -122,10 +122,18 @@ const server = http.createServer((req, res) => {
   const tt = state.timetable;
 
   if (url.pathname === '/api/trains') {
+    // ?modes=rail,tram,…  &bbox=süd,west,nord,ost – ohne Angabe: alle Verkehrsmittel/ganzes Gebiet
     if (!tt) return sendJson(req, res, 503, { error: state.loadError || 'Fahrplan wird geladen …' });
     const now = Date.now();
     if (now - cache.at > 2000) cache = { at: now, body: { now, trains: tt.positions(now, realtime) } };
-    return sendJson(req, res, 200, { ...cache.body, serverTime: now, legsVersion: legStore?.version ?? null });
+    const modes = url.searchParams.get('modes')?.split(',');
+    const bbox = url.searchParams.get('bbox')?.split(',').map(Number);
+    const inBox = (t) => {
+      if (!bbox || bbox.length !== 4 || bbox.some(Number.isNaN)) return true;
+      return t.points.some(([lat, lon]) => lat >= bbox[0] && lat <= bbox[2] && lon >= bbox[1] && lon <= bbox[3]);
+    };
+    const trains = cache.body.trains.filter((t) => (!modes || modes.includes(t.mode)) && inBox(t));
+    return sendJson(req, res, 200, { now: cache.body.now, trains, serverTime: now, legsVersion: legStore?.version ?? null });
   }
   if (url.pathname.startsWith('/api/trip/')) {
     if (!tt) return sendJson(req, res, 503, { error: 'Fahrplan wird geladen …' });

@@ -1,7 +1,13 @@
-// Liest den statischen GTFS-Fahrplan ein – nur Bahn-Linien und nur Fahrten,
-// die in einem kleinen Datumsfenster verkehren, damit der Speicher klein bleibt.
-import { readCsv } from './csv.js';
+// Liest den statischen GTFS-Fahrplan ein – nur die gewünschten Verkehrsmittel
+// und nur Fahrten, die in einem kleinen Datumsfenster verkehren.
+import fsp from 'node:fs/promises';
+import path from 'node:path';
+import { readCsv, parseLine } from './csv.js';
 import { addDays, parseGtfsTime, weekday } from './time.js';
+
+import { modeOf } from './modes.js';
+
+export { modeOf };
 
 const WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
 
@@ -51,7 +57,7 @@ async function loadServices(src, days) {
 
 /**
  * @param src     Ergebnis von openGtfs()
- * @param options { routeTypes:Set<number>, centerDay:number (YYYYMMDD), log }
+ * @param options { routeTypes: { has(type) } (z. B. modeFilter()), centerDay:number (YYYYMMDD), bbox, log }
  */
 export async function loadGtfs(src, { routeTypes, centerDay, bbox = null, log = console.log }) {
   const t0 = Date.now();
@@ -78,16 +84,20 @@ export async function loadGtfs(src, { routeTypes, centerDay, bbox = null, log = 
       type,
     };
     route.category = categoryOf(route);
+    route.mode = modeOf(type);
     routes.set(route.id, route);
   });
 
   const trips = new Map();
+  let row = -1;
   await readCsv(await src.open('trips.txt'), (r, i) => {
+    row++;
     const route = routes.get(r[i.route_id]);
     if (!route) return;
     const serviceId = r[i.service_id];
     if (!usedServices.has(serviceId)) return;
     trips.set(r[i.trip_id], {
+      row,
       id: r[i.trip_id],
       route,
       serviceId,
@@ -99,14 +109,16 @@ export async function loadGtfs(src, { routeTypes, centerDay, bbox = null, log = 
 
   const neededStops = new Set();
   let rows = 0;
-  await readCsv(await src.open('stop_times.txt'), (r, i) => {
+  const onStopTime = (r, i) => {
     rows++;
     const trip = trips.get(r[i.trip_id]);
     if (!trip) return;
     const stopId = r[i.stop_id];
     neededStops.add(stopId);
     trip.raw.push([Number(r[i.stop_sequence]), stopId, parseGtfsTime(r[i.arrival_time]), parseGtfsTime(r[i.departure_time])]);
-  });
+  };
+  if (src.dir && src.has('stop_times.idx')) await readIndexedStopTimes(src.dir, trips, onStopTime);
+  else await readCsv(await src.open('stop_times.txt'), onStopTime);
 
   const stopIndex = new Map();
   const stops = { id: [], name: [], lat: [], lon: [], parent: [] };
@@ -154,10 +166,50 @@ export async function loadGtfs(src, { routeTypes, centerDay, bbox = null, log = 
     fillMissingTimes(trip);
   }
 
-  log(`GTFS: ${routes.size} Bahnlinien, ${trips.size} Fahrten (${outside} ausserhalb ignoriert), ${stops.id.length} Halte `
+  const perMode = {};
+  for (const t of trips.values()) perMode[t.route.mode] = (perMode[t.route.mode] || 0) + 1;
+  const modes = Object.entries(perMode).sort((a, b) => b[1] - a[1]).map(([m, n]) => `${m} ${n.toLocaleString('de-CH')}`).join(', ');
+  log(`GTFS: ${routes.size} Linien, ${trips.size.toLocaleString('de-CH')} Fahrten (${modes}; ${outside} ausserhalb ignoriert), ${stops.id.length} Halte `
     + `(${rows.toLocaleString('de-CH')} stop_times gelesen) in ${((Date.now() - t0) / 1000).toFixed(1)} s`);
 
   return { days, services, routes, trips, stops, stopIndex };
+}
+
+/**
+ * Liest nur die Haltezeiten der gegebenen Fahrten über stop_times.idx
+ * (Byte-Position/-Länge pro Zeile in trips.txt, siehe gtfs-extract.js).
+ * Nahe beieinanderliegende Bereiche werden zu grösseren Lesevorgängen
+ * zusammengefasst; Zeilen fremder Fahrten darin verwirft onRow selbst.
+ */
+async function readIndexedStopTimes(dir, trips, onRow) {
+  const index = await fsp.readFile(path.join(dir, 'stop_times.idx'));
+  const ranges = [];
+  for (const trip of trips.values()) {
+    const off = index.readDoubleLE(trip.row * 12), len = index.readUInt32LE(trip.row * 12 + 8);
+    if (off >= 0 && len > 0) ranges.push([off, off + len]);
+  }
+  ranges.sort((a, b) => a[0] - b[0]);
+  const fh = await fsp.open(path.join(dir, 'stop_times.txt'));
+  try {
+    const head = Buffer.alloc(4096);
+    const { bytesRead } = await fh.read(head, 0, head.length, 0);
+    const header = head.toString('utf8', 0, bytesRead).split('\n')[0].replace(/^\uFEFF/, '');
+    const idx = {};
+    parseLine(header).forEach((name, k) => { idx[name.trim()] = k; });
+    const GAP = 64 * 1024, MAX = 8 * 1024 * 1024;
+    let buf = Buffer.alloc(MAX);
+    for (let k = 0; k < ranges.length;) {
+      let [start, end] = ranges[k++];
+      while (k < ranges.length && ranges[k][0] - end < GAP && ranges[k][1] - start < MAX) end = Math.max(end, ranges[k++][1]);
+      if (end - start > buf.length) buf = Buffer.alloc(end - start);
+      await fh.read(buf, 0, end - start, start);
+      for (const line of buf.toString('utf8', 0, end - start).split('\n')) {
+        if (line) onRow(parseLine(line), idx);
+      }
+    }
+  } finally {
+    await fh.close();
+  }
 }
 
 /** Halte ohne Zeiten (-1) linear zwischen den Nachbarn interpolieren. */

@@ -11,6 +11,7 @@ export async function openGtfs(filePath) {
   const stat = await fsp.stat(filePath);
   if (stat.isDirectory()) {
     return {
+      dir: filePath,
       has: (name) => fs.existsSync(path.join(filePath, name)),
       open: async (name) => fs.createReadStream(path.join(filePath, name)),
       close: () => {},

@@ -3,6 +3,7 @@
 // (Streckengeometrie bis zum nächsten Halt); der Browser interpoliert entlang
 // dieser Geometrie bzw. geradlinig, solange sie fehlt.
 import { serviceDayStart } from './time.js';
+import { ROUTED_MODES } from './modes.js';
 
 // So viele kommende Wegpunkte bekommt der Browser, um selbst flüssig zu animieren.
 const LOOKAHEAD = 3;
@@ -17,6 +18,7 @@ export class Timetable {
       // jedem Abschnitt Halt k -> k+1 eine Leg-ID (Streckengeometrie) zuordnen
       const { lat, lon } = data.stops;
       for (const trip of data.trips.values()) {
+        if (!ROUTED_MODES.has(trip.route.mode ?? 'rail')) continue; // Bus, Schiff, Seilbahn: Luftlinie
         trip.leg = new Int32Array(trip.stop.length - 1);
         for (let k = 0; k < trip.leg.length; k++) {
           const a = trip.stop[k], b = trip.stop[k + 1];
@@ -128,6 +130,7 @@ export class Timetable {
         id: `${trip.id}|${day}`,
         name: route.shortName || route.category,
         cat: route.category,
+        mode: route.mode ?? 'rail',
         num: trip.shortName,
         to: trip.headsign || stops.name[trip.stop[n - 1]],
         op: route.agency,
@@ -166,6 +169,7 @@ export class Timetable {
       id: key,
       name: trip.route.shortName || trip.route.category,
       cat: trip.route.category,
+      mode: trip.route.mode ?? 'rail',
       num: trip.shortName,
       to: trip.headsign,
       op: trip.route.agency,

@@ -1,6 +1,6 @@
 # Swiss Train Map
 
-Live-Karte aller Züge in der Schweiz – nachgebaut mit offenen Daten:
+Live-Karte des öffentlichen Verkehrs in der Schweiz – Züge, Trams, Busse, Schiffe und Bergbahnen – nachgebaut mit offenen Daten:
 
 - **Fahrplan:** GTFS-Fahrplan von [opentransportdata.swiss](https://opentransportdata.swiss)
 - **Echtzeit:** GTFS-RT Trip Updates (Verspätungen, Ausfälle) von opentransportdata.swiss
@@ -13,8 +13,9 @@ Es gibt in der Schweiz keine öffentlichen GPS-Positionen der Züge. Die Positio
 bekannten Zugradar-Karten – **berechnet**:
 
 1. Der Server lädt den GTFS-Fahrplan nur, wenn der Permalink auf eine neue Version zeigt, und erstellt daraus
-   einmal einen Auszug nur mit Bahnfahrten (rund 10 % des Landesfahrplans). Beim Start und bei jedem
-   Tageswechsel liest er nur diesen Auszug, und daraus nur die Fahrten von gestern/heute/morgen.
+   einmal einen Auszug für die gewählten Verkehrsmittel (`MODES`): Verkehrstage als kompakte Bitmaske statt
+   11 Mio. Kalender-Ausnahmen und ein Index, wo die Haltezeiten jeder Fahrt stehen. Beim Start und bei
+   jedem Tageswechsel liest er damit gezielt nur die Fahrten von gestern/heute/morgen.
 2. Alle 35 s holt er GTFS-RT Trip Updates und rechnet die Verspätungen auf die Halte der Fahrt um
    (Verspätungen werden auf nachfolgende Halte übertragen, ausgefallene Fahrten ausgeblendet).
 3. Das Gleisnetz der Schweiz wird aus OpenStreetMap geladen (`railway=rail|narrow_gauge|light_rail|funicular`,
@@ -26,7 +27,11 @@ bekannten Zugradar-Karten – **berechnet**:
 4. `/api/trains` liefert für jeden fahrenden Zug den aktuellen Halt plus die nächsten Wegpunkte mit
    (erwarteten) Ankunfts-/Abfahrtszeiten.
    Jeder Wegpunkt trägt die ID des folgenden Streckenabschnitts.
-5. Der Browser holt die Geometrie der Abschnitte einmalig (`/api/legs`), interpoliert die Position entlang der
+5. Züge zeigt die Karte immer; die übrigen Verkehrsmittel erst ab einer Zoomstufe (Schiffe ab 10, Metro und
+   Bergbahnen ab 11, Trams ab 12, Busse ab 13) und nur für den sichtbaren Ausschnitt (`/api/trains?modes=…&bbox=…`).
+   Trams, Metro und Standseilbahnen fahren wie Züge auf den OSM-Gleisen, Busse, Schiffe und Luftseilbahnen auf
+   der Luftlinie zwischen den Halten.
+6. Der Browser holt die Geometrie der Abschnitte einmalig (`/api/legs`), interpoliert die Position entlang der
    Gleise und animiert die Züge flüssig; neue Positionsdaten alle 10 s.
 
 ## Starten
@@ -74,7 +79,8 @@ Fahrplan und Prognose.
 | `GTFS_URL` | Permalink *timetable-2026-gtfs2020* | Download-URL des GTFS-ZIP. Zum Fahrplanwechsel im Dezember auf den neuen Datensatz anpassen. |
 | `GTFS_CACHE_FILE` | `data/gtfs.zip` | Ablage des heruntergeladenen Fahrplans |
 | `GTFS_MAX_AGE_HOURS` | `6` | So oft wird geprüft, ob der Permalink auf eine neue Fahrplan-Version zeigt; nur dann wird neu geladen |
-| `GTFS_EXTRACT_DIR` | `data/gtfs-rail` | Auszug nur mit Bahnfahrten, einmal pro Fahrplan-Version erstellt |
+| `MODES` | `rail,tram,metro,bus,ship,cable,funicular` | Verkehrsmittel, die geladen werden (z. B. nur `rail` für eine reine Zugkarte) |
+| `GTFS_EXTRACT_DIR` | `data/gtfs-extract` | Auszug für die gewählten Verkehrsmittel, einmal pro Fahrplan-Version erstellt |
 | `GTFS_RT_URL` | `https://api.opentransportdata.swiss/la/gtfs-rt` | GTFS-RT-Endpunkt |
 | `GTFS_RT_API_KEY` | – | API-Key für GTFS-RT |
 | `GTFS_RT_ENABLED` | – | `1` = GTFS-RT auch ohne `GTFS_RT_API_KEY` abfragen (wenn ein Proxy den `Authorization`-Header ergänzt) |
@@ -87,7 +93,6 @@ Fahrplan und Prognose.
 | `RAIL_OSM_CACHE_FILE` | `data/rail-osm.json` | Ablage des heruntergeladenen Gleisnetzes |
 | `RAIL_OSM_MAX_AGE_DAYS` | `30` | Danach wird das Gleisnetz neu geladen (nur falls Abschnitte fehlen) |
 | `RAIL_LEGS_CACHE_FILE` | `data/rail-legs.json` | Berechnete Streckenabschnitte |
-| `ROUTE_TYPES` | `2,100,…,117` | GTFS `route_type`s, die als Zug gelten (z. B. zusätzlich `400,900` für Metro/Tram) |
 
 ## API
 
@@ -125,7 +130,7 @@ test/                      Tests (npm test)
 - **Keine echten GPS-Daten:** Die Position ist eine Schätzung aus Fahrplan + Prognose.
 - Der Landesfahrplan (inkl. Bus) ist gross; der erste Import dauert je nach Rechner etwa 1–2 Minuten und
   braucht einige hundert MB RAM.
-- Weitere Ideen: Trams/Busse (`ROUTE_TYPES`), Störungsmeldungen (GTFS-RT Service Alerts), Abfahrtstafeln
+- Weitere Ideen: Störungsmeldungen (GTFS-RT Service Alerts), Abfahrtstafeln
   pro Bahnhof, WebSocket statt Polling.
 
 ## Lizenzen der Daten

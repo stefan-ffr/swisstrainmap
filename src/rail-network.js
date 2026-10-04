@@ -10,7 +10,7 @@ import { pipeline } from 'node:stream/promises';
 // Grenzgebiet mit: Züge nach Lörrach, Konstanz, Domodossola, Annemasse …
 const BBOX = '45.75,5.85,47.85,10.55';
 export const OVERPASS_QUERY = `[out:json][timeout:900][maxsize:2000000000];
-way["railway"~"^(rail|narrow_gauge|light_rail|funicular)$"]["service"!~"^(yard|spur)$"](${BBOX});
+way["railway"~"^(rail|narrow_gauge|light_rail|funicular|tram|subway)$"]["service"!~"^(yard|spur)$"](${BBOX});
 out body qt; >; out skel qt;`;
 
 const SNAP_RADIUS = 300;      // m: Gleise im Umkreis eines Halts als Start/Ziel
@@ -31,9 +31,12 @@ const CELL = 0.003;           // Grad, Rasterweite des räumlichen Index
  * Die Server in urls werden der Reihe nach versucht.
  */
 export async function ensureRailOsm(urls, cacheFile, maxAgeDays, log = console.log) {
+  // Bei geänderter Abfrage (z. B. neue Gleisarten) neu laden
+  const queryFile = `${cacheFile}.query`;
+  const knownQuery = await fsp.readFile(queryFile, 'utf8').catch(() => null);
   try {
     const stat = await fsp.stat(cacheFile);
-    if ((Date.now() - stat.mtimeMs) / 86400e3 < maxAgeDays) return cacheFile;
+    if (knownQuery === OVERPASS_QUERY && (Date.now() - stat.mtimeMs) / 86400e3 < maxAgeDays) return cacheFile;
   } catch { /* noch kein Cache */ }
   await fsp.mkdir(path.dirname(cacheFile), { recursive: true });
   const errors = [];
@@ -52,6 +55,7 @@ export async function ensureRailOsm(urls, cacheFile, maxAgeDays, log = console.l
       const tail = (await fsp.readFile(tmp, 'utf8')).slice(-2000);
       if (/"remark"\s*:\s*"runtime error/.test(tail)) throw new Error('Overpass-Abfrage abgebrochen (runtime error)');
       await fsp.rename(tmp, cacheFile);
+      await fsp.writeFile(queryFile, OVERPASS_QUERY);
       log(`Gleisnetz: gespeichert unter ${cacheFile}`);
       return cacheFile;
     } catch (err) {
