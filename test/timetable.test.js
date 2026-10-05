@@ -176,3 +176,39 @@ test('Fahrplanjahr wechselt am Sonntag zwischen 10. und 16. Dezember', async () 
   assert.deepEqual([20251213, 20251214, 20261005, 20261212, 20261213, 20271212].map(timetableYear),
     [2025, 2026, 2026, 2026, 2027, 2028]);
 });
+
+test('Störungsmeldungen (GTFS-SA) zu Linie, Halt und Fahrt', async () => {
+  const { AlertStore, stationKey } = await import('../src/alerts.js');
+  assert.equal(stationKey('ch:1:sloid:3000:7:12'), '8503000');
+  assert.equal(stationKey('8503000:0:7'), '8503000');
+  assert.equal(stationKey('Parent8503000'), '8503000');
+
+  const { FeedMessage, Alert } = GtfsRealtimeBindings.transit_realtime;
+  const text = (de, fr) => ({ translation: [{ text: fr, language: 'fr' }, { text: de, language: 'de' }] });
+  const s = (hhmm) => at(hhmm) / 1000;
+  const buffer = FeedMessage.encode(FeedMessage.fromObject({
+    header: { gtfsRealtimeVersion: '2.0', timestamp: s('05:00') },
+    entity: [
+      { id: 'linie', alert: { headerText: text('Bauarbeiten Zürich–Luzern', 'Travaux'), effect: Alert.Effect.REDUCED_SERVICE,
+        activePeriod: [{ start: s('05:00'), end: s('23:00') }], informedEntity: [{ routeId: 'IR70' }] } },
+      { id: 'halt', alert: { headerText: text('Lift in Zug ausser Betrieb', 'Ascenseur'), effect: Alert.Effect.ACCESSIBILITY_ISSUE,
+        informedEntity: [{ stopId: 'ZG' }] } },
+      { id: 'vorbei', alert: { headerText: text('Gestern', 'Hier'), activePeriod: [{ start: s('01:00'), end: s('02:00') }],
+        informedEntity: [{ trip: { tripId: 'IR70-0-305' } }] } },
+    ],
+  })).finish();
+  const alerts = new AlertStore('de');
+  alerts.ingestBuffer(Buffer.from(buffer));
+  assert.equal(alerts.status.alerts, 3);
+  assert.equal(alerts.active(at('05:17')).length, 2, 'abgelaufene Meldung nicht aktiv');
+
+  const t = at('05:17');
+  const ir = ir70(tt.positions(t, null, {}, alerts));
+  assert.equal(ir.alert, true, 'Linie betroffen');
+  const detail = tt.trip(`IR70-0-305|${DAY}`, null, alerts, t);
+  assert.deepEqual(detail.alerts.map((a) => a.header), ['Bauarbeiten Zürich–Luzern', 'Lift in Zug ausser Betrieb']);
+  assert.equal(detail.alertsWhole, 1);
+  assert.deepEqual(detail.stops.find((x) => x.name === 'Zug').alerts, [1]);
+  assert.equal(detail.alerts[0].routes[0], 'IR70');
+  assert.equal(detail.alerts[1].stops[0].name, 'Zug');
+});

@@ -10,6 +10,7 @@ import { loadGtfs } from './gtfs-loader.js';
 import { ensureExtractInWorker } from './extract-worker.js';
 import { Timetable } from './timetable.js';
 import { RealtimeStore } from './realtime.js';
+import { AlertStore } from './alerts.js';
 import { timetableYear, todayKey } from './time.js';
 import { loadForeignFeeds, extendWithForeign } from './foreign.js';
 import { LegStore } from './legs.js';
@@ -21,6 +22,7 @@ const log = (msg) => console.log(`[${new Date().toISOString()}] ${msg}`);
 
 const state = { timetable: null, loading: false, loadedAt: null, loadError: null };
 const realtime = new RealtimeStore();
+const alerts = new AlertStore(config.alertsLang);
 const extraLog = new ExtraLog(path.resolve(root, config.extrasFile), log);
 const extraLogLoaded = extraLog.load();
 
@@ -178,14 +180,14 @@ const server = http.createServer((req, res) => {
     let trains;
     if (key !== null && cache.get(key)?.at > now - 2000) trains = cache.get(key).trains;
     else {
-      trains = tt.positions(now, realtime, filter);
+      trains = tt.positions(now, realtime, filter, alerts);
       if (key !== null) cache.set(key, { at: now, trains });
     }
     return sendJson(req, res, 200, { now, trains, serverTime: now, legsVersion: legStore?.version ?? null });
   }
   if (url.pathname.startsWith('/api/trip/')) {
     if (!tt) return sendJson(req, res, 503, { error: 'Fahrplan wird geladen …' });
-    const trip = tt.trip(decodeURIComponent(url.pathname.slice('/api/trip/'.length)), realtime);
+    const trip = tt.trip(decodeURIComponent(url.pathname.slice('/api/trip/'.length)), realtime, alerts);
     if (trip) trip.legs = trip.legs.map((id) => legStore?.geometry(id) || '');
     return trip ? sendJson(req, res, 200, trip) : sendJson(req, res, 404, { error: 'Fahrt unbekannt' });
   }
@@ -203,6 +205,14 @@ const server = http.createServer((req, res) => {
     const day = Number(url.searchParams.get('day')) || todayKey(Date.now(), config.timeZone);
     return sendJson(req, res, 200, { day, extras: extraLog.forDay(day) });
   }
+  if (url.pathname === '/api/alerts') {
+    // aktive Störungsmeldungen, wichtigste zuerst
+    const order = ['NO_SERVICE', 'SIGNIFICANT_DELAYS', 'DETOUR', 'REDUCED_SERVICE', 'STOP_MOVED', 'MODIFIED_SERVICE', 'ADDITIONAL_SERVICE'];
+    const rank = (a) => (order.includes(a.effect) ? order.indexOf(a.effect) : order.length);
+    const list = alerts.active(Date.now()).map((a) => AlertStore.describe(a, tt?.data))
+      .sort((a, b) => rank(a) - rank(b) || (b.start ?? 0) - (a.start ?? 0));
+    return sendJson(req, res, 200, { alerts: list, status: alerts.status });
+  }
   if (url.pathname === '/api/status') {
     return sendJson(req, res, 200, {
       timetable: {
@@ -210,6 +220,7 @@ const server = http.createServer((req, res) => {
         days: tt?.days.map((d) => d.day), trips: tt?.data.trips.size,
       },
       realtime: realtime.status,
+      alerts: alerts.status,
       legs: legStore ? { ...legStore.status, enabled: true } : { enabled: false },
     });
   }
@@ -226,4 +237,12 @@ realtime.start({
   log,
   onUpdate: () => recordExtras().catch((err) => log(`Extrafahrten: ${err.message}`)),
 });
+alerts.start({
+  url: config.alertsUrl,
+  apiKey: config.alertsApiKey,
+  enabled: config.alertsEnabled,
+  intervalSeconds: config.alertsIntervalSeconds,
+  cacheFile: path.resolve(root, config.alertsCacheFile),
+  log,
+}).then((on) => { if (!on) log('GTFS-SA: kein API-Key – keine Störungsmeldungen.'); });
 reload();

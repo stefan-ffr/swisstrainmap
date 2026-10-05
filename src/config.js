@@ -42,6 +42,16 @@ export const config = {
   // 35 s passt mit Reserve zu beiden (Minimum 12 s).
   rtIntervalSeconds: Number(env.GTFS_RT_INTERVAL || 35),
   rtCacheFile: env.GTFS_RT_CACHE_FILE || 'data/gtfs-rt.pb',
+
+  // GTFS-SA (Störungsmeldungen). Gleicher Key wie GTFS-RT, sofern die
+  // Anwendung im API-Manager auch «GTFS Service Alerts» abonniert hat.
+  alertsUrl: env.GTFS_SA_URL || 'https://api.opentransportdata.swiss/la/gtfs-sa',
+  alertsApiKey: env.GTFS_SA_API_KEY || env.GTFS_RT_API_KEY || '',
+  alertsEnabled: (env.GTFS_SA_ENABLED ?? env.GTFS_RT_ENABLED) === '1',
+  alertsIntervalSeconds: Number(env.GTFS_SA_INTERVAL || 120),
+  alertsCacheFile: env.GTFS_SA_CACHE_FILE || 'data/gtfs-sa.pb',
+  // Sprache der Meldungen (de, fr, it, en)
+  alertsLang: env.ALERTS_LANG || 'de',
   // Protokoll der Extrafahrten (Zusatzfahrten aus GTFS-RT) der letzten 2 Tage
   extrasFile: env.EXTRAS_FILE || 'data/extras.json',
 

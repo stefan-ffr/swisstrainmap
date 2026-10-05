@@ -23,6 +23,8 @@ bekannten Zugradar-Karten – **berechnet**:
    Fahrt nur enthält, solange sie läuft, protokolliert der Server jede Extrafahrt (`data/extras.json`, zwei
    Tage); die Liste „Extrafahrten heute“ zeigt auch bereits beendete. Güterzüge sind in keinen offenen Daten
    enthalten.
+   Störungsmeldungen kommen aus GTFS-SA (alle 2 Minuten): Fahrzeuge betroffener Fahrten bzw. Linien tragen ein
+   ⚠, die Detailansicht zeigt die Meldung und markiert betroffene Halte, „Störungen“ listet alle aktuellen.
 3. Das Gleisnetz der Schweiz wird aus OpenStreetMap geladen (`railway=rail|narrow_gauge|light_rail|funicular`,
    ohne Rangiergleise). Für jedes Paar aufeinanderfolgender Halte sucht der Server per A* den Weg über die
    Gleise – über gerichtete Gleisabschnitte, sodass Züge an Weichen nicht „umkehren“ (max. 70° Richtungsänderung
@@ -133,6 +135,11 @@ Fahrplan und Prognose.
 | `GTFS_RT_INTERVAL` | `35` | Abfrageintervall GTFS-RT in Sekunden (Minimum 12; beim Plan mit 5 Abfragen/min z. B. `15`) |
 | `EXTRAS_FILE` | `data/extras.json` | Protokoll der Extrafahrten (letzte 2 Tage) |
 | `GTFS_RT_CACHE_FILE` | `data/gtfs-rt.pb` | Letzter GTFS-RT-Feed (für Neustarts) |
+| `GTFS_SA_API_KEY` | = `GTFS_RT_API_KEY` | Key für GTFS-SA (Störungsmeldungen). Meist derselbe Key: im API-Manager die Anwendung zusätzlich für «GTFS Service Alerts» abonnieren |
+| `GTFS_SA_URL` | `…/la/gtfs-sa` | Endpunkt der Störungsmeldungen |
+| `GTFS_SA_INTERVAL` | `120` | Abfrageintervall GTFS-SA in Sekunden |
+| `GTFS_SA_ENABLED` | = `GTFS_RT_ENABLED` | `1` = auch ohne eigenen Key abfragen (Proxy ergänzt die Authentisierung) |
+| `ALERTS_LANG` | `de` | Sprache der Meldungen (`de`, `fr`, `it`, `en`) |
 | `RAIL_ROUTING` | `1` | `0` = Gleisnetz nicht verwenden (Luftlinie) |
 | `RAIL_OSM_PATH` | – | Lokale Overpass-JSON-Datei mit dem Gleisnetz (statt Download) |
 | `OVERPASS_URL` | `https://overpass.osm.ch/api/interpreter,https://overpass-api.de/api/interpreter` | Overpass-Server (kommagetrennt, der Reihe nach versucht) |
@@ -155,6 +162,7 @@ Fahrplan und Prognose.
   `null` = wird noch berechnet)
 - `GET /api/trip/<tripId>|<YYYYMMDD>` – Halteliste mit Soll- und Prognosezeiten und Streckenverlauf
 - `GET /api/extras?day=YYYYMMDD` – Protokoll der Extrafahrten eines Tages (Standard: heute), auch beendete
+- `GET /api/alerts` – aktive Störungsmeldungen (GTFS-SA) mit betroffenen Linien und Halten, wichtigste zuerst
 - `GET /api/status` – Zustand von Fahrplan- und Echtzeit-Import
 
 ## Projektstruktur
