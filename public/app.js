@@ -105,6 +105,8 @@ function alertHtml(a, open = openAlerts.has(a.id)) {
 // --- Zugkomposition (Train Formation Service) --------------------------------
 
 let formationEnabled = false;
+let drawingsEnabled = false;
+const drawingSets = new Map(); // Fahrt-ID -> Antwort von /api/drawings bzw. { error }
 const formations = new Map(); // Fahrt-ID -> Antwort von /api/formation bzw. { error }
 let formationOpen = null; // Fahrt-ID, deren Komposition angezeigt wird
 let formationStop = null; // gewählter Halt (Name)
@@ -115,35 +117,62 @@ const OFFERS = {
   WL: ['🛏', 'Schlafwagen'], CC: ['🛏', 'Liegewagen'],
 };
 
-function formationHtml(f, liveStop) {
-  if (f.error) return `<p class="sub">${esc(f.error)}</p>`;
-  if (!f.stops?.length) return '<p class="sub">Keine Kompositionsdaten.</p>';
+/** Zeichnungen den Wagen zuordnen (gleiche Anzahl, Klassen passen vorwärts oder rückwärts). */
+function alignDrawings(wagons, d) {
+  if (!d?.wagons?.length || wagons.length !== d.wagons.length) return null;
+  const same = (a, b) => !a || !b || a === b || (a === 'WR' && /^W/.test(b)) || (a === '1' && b === '12') || (a === '12' && b === '1');
+  const score = (list) => list.reduce((n, x, i) => n + (same(x.cls, wagons[i].type) ? 1 : 0), 0);
+  const fwd = score(d.wagons), rev = score([...d.wagons].reverse());
+  if (Math.max(fwd, rev) < wagons.length * 0.7) return null;
+  return fwd >= rev ? d.wagons.map((x) => ({ ...x, flip: false })) : [...d.wagons].reverse().map((x) => ({ ...x, flip: true }));
+}
+
+const drawingImg = (x) => `<a href="${esc(x.url || '#')}" target="_blank" rel="noopener" title="${esc(x.name)} – reisezuege.ch"><img class="draw${x.flip ? ' flip' : ''}" src="${esc(x.img)}" alt="${esc(x.name)}" loading="lazy"></a>`;
+function drawingsCredit(d, planned) {
+  return `<div class="sub credit">Zeichnungen: <a href="${esc(d.page)}" target="_blank" rel="noopener">reisezuege.ch</a> (Markus Blaser, mit Erlaubnis)${planned ? ` · geplante Komposition ${esc(d.label)}` : ''}</div>`;
+}
+
+function formationHtml(f, liveStop, d) {
+  const strip = d?.wagons?.length ? `<div class="strip">${d.wagons.map(drawingImg).join('')}</div>${drawingsCredit(d, true)}` : '';
+  if (!f || f.error || !f.stops?.length) {
+    const msg = !f ? '' : f.error ? esc(f.error) : 'Keine Kompositionsdaten.';
+    return (strip || '') + (msg && !strip ? `<p class="sub">${msg}</p>` : '') || '<p class="sub">Keine Kompositionsdaten.</p>';
+  }
   const stop = f.stops.find((x) => x.name === formationStop) ?? f.stops.find((x) => x.name === liveStop) ?? f.stops[0];
   const options = f.stops.map((x) => `<option ${x === stop ? 'selected' : ''}>${esc(x.name)}</option>`).join('');
   let lastSector = null, lastUnit = null;
-  const cells = stop.wagons.map((w) => {
+  const aligned = alignDrawings(stop.wagons, d);
+  const cells = stop.wagons.map((w, i) => {
     const head = w.sector && w.sector !== lastSector ? `<b class="sector">${esc(w.sector)}</b>` : '';
     const gap = lastUnit !== null && w.unit !== lastUnit ? ' gap' : '';
     lastSector = w.sector; lastUnit = w.unit;
     const offers = w.offers.map((o) => OFFERS[o] ? `<span title="${OFFERS[o][1]}">${OFFERS[o][0]}</span>` : '').join('');
     const title = [w.number ? `Wagen ${w.number}` : '', ...w.offers.map((o) => OFFERS[o]?.[1] ?? o), ...w.status].filter(Boolean).join(' · ');
-    return `<div class="wagon${gap}${w.status.length ? ' closed' : ''}${/^(1|W1)$/.test(w.type) ? ' first' : ''}" title="${esc(title)}">${head}<span class="cls">${esc(WAGON_LABEL[w.type] ?? w.type)}</span><small>${w.number ?? '&nbsp;'}</small><span class="offers">${offers}</span></div>`;
+    const pic = aligned ? drawingImg(aligned[i]) : '';
+    return `<div class="wagon${gap}${aligned ? ' drawn' : ''}${w.status.length ? ' closed' : ''}${/^(1|W1)$/.test(w.type) ? ' first' : ''}" title="${esc(title)}">${head}${pic}<span class="cls">${esc(WAGON_LABEL[w.type] ?? w.type)}</span><small>${w.number ?? '&nbsp;'}</small><span class="offers">${offers}</span></div>`;
   }).join('');
   const goals = stop.goals.filter((g) => g.destination).map((g) => `Wagen ${g.from}–${g.to} → ${esc(g.destination)}`).join(' · ');
   return `
     <div class="sub">Am Halt <select id="formation-stop">${options}</select>${stop.track ? ` · Gleis ${esc(stop.track)}` : ''}</div>
-    <div class="train">${cells}</div>
+    <div class="train${aligned ? ' wide' : ''}">${cells}</div>
+    ${aligned ? drawingsCredit(d, false) : strip}
     <div class="sub">${f.types.length ? `Fahrzeuge: ${f.types.map(esc).join(', ')}` : ''}${goals ? `<br>${goals}` : ''}<br>Reihenfolge wie am Perron (Sektor A links)</div>`;
 }
 
 async function loadFormation(id) {
-  try {
-    const res = await fetch(`api/formation/${encodeURIComponent(id)}`);
-    const body = await res.json();
-    formations.set(id, res.ok ? body : { error: body.error || res.statusText });
-  } catch (err) {
-    formations.set(id, { error: err.message });
-  }
+  const get = async (what, store) => {
+    try {
+      const res = await fetch(`api/${what}/${encodeURIComponent(id)}`);
+      const body = await res.json();
+      store.set(id, res.ok ? body : { error: body.error || res.statusText });
+    } catch (err) {
+      store.set(id, { error: err.message });
+    }
+  };
+  await Promise.all([
+    formationEnabled ? get('formation', formations) : formations.set(id, null),
+    drawingsEnabled ? get('drawings', drawingSets) : drawingSets.set(id, null),
+  ]);
   if (selectedId === id) showDetails(id);
 }
 
@@ -313,6 +342,7 @@ async function pollStatus() {
       : 'Echtzeit aus – Positionen nach Fahrplan (GTFS_RT_API_KEY setzen)';
     if (rt.lastError) text += ` · Fehler: ${rt.lastError}`;
     formationEnabled = !!s.formation?.enabled;
+    drawingsEnabled = !!s.drawings?.enabled;
     if (s.alerts?.enabled && s.alerts.lastSuccess) {
       $('alerts-btn').hidden = false;
       $('alerts-btn').textContent = `Störungen (${s.alerts.alerts})`;
@@ -481,9 +511,9 @@ async function showDetails(id) {
     <div class="actions">
       <button id="follow-btn" class="link-btn" type="button" aria-pressed="${follow}">${follow ? 'Verfolgen: an' : 'Verfolgen'}</button>
       <button id="route-btn" class="link-btn" type="button">Ganze Strecke</button>
-      ${formationEnabled && trip.mode === 'rail' ? `<button id="formation-btn" class="link-btn" type="button" aria-pressed="${formationOpen === id}">Komposition</button>` : ''}
+      ${(formationEnabled || drawingsEnabled) && trip.mode === 'rail' ? `<button id="formation-btn" class="link-btn" type="button" aria-pressed="${formationOpen === id}">Komposition</button>` : ''}
     </div>
-    ${formationOpen === id ? `<div id="formation">${formations.has(id) ? formationHtml(formations.get(id), live?.at || live?.next) : '<p class="sub">Lade Komposition …</p>'}</div>` : ''}
+    ${formationOpen === id ? `<div id="formation">${formations.has(id) ? formationHtml(formations.get(id), live?.at || live?.next, drawingSets.get(id)?.error ? null : drawingSets.get(id)) : '<p class="sub">Lade Komposition …</p>'}</div>` : ''}
     ${(trip.alerts || []).slice(0, trip.alertsWhole).map((a) => alertHtml(a)).join('')}
     <table><tr><td></td><td class="t">an</td><td class="t">ab</td></tr>${rows}</table>
     ${trip.alerts?.length > trip.alertsWhole ? `<h3>Hinweise zu Halten</h3>${trip.alerts.slice(trip.alertsWhole).map((a) => alertHtml(a)).join('')}` : ''}`;

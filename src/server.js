@@ -12,6 +12,7 @@ import { Timetable } from './timetable.js';
 import { RealtimeStore } from './realtime.js';
 import { AlertStore } from './alerts.js';
 import { FormationService, evuOf } from './formation.js';
+import { ReisezuegeStore, classOf, BASE as REISEZUEGE } from './reisezuege.js';
 import { timetableYear, todayKey } from './time.js';
 import { loadForeignFeeds, extendWithForeign } from './foreign.js';
 import { LegStore } from './legs.js';
@@ -24,6 +25,7 @@ const log = (msg) => console.log(`[${new Date().toISOString()}] ${msg}`);
 const state = { timetable: null, loading: false, loadedAt: null, loadError: null };
 const realtime = new RealtimeStore();
 const alerts = new AlertStore(config.alertsLang);
+const drawings = config.drawingsEnabled ? new ReisezuegeStore({ dir: path.resolve(root, config.drawingsDir), bundled: path.resolve(root, config.drawingsBundled), log }) : null;
 const formation = new FormationService({ url: config.formationUrl, apiKey: config.formationApiKey, enabled: config.formationEnabled, log });
 const extraLog = new ExtraLog(path.resolve(root, config.extrasFile), log);
 const extraLogLoaded = extraLog.load();
@@ -224,6 +226,39 @@ const server = http.createServer((req, res) => {
       .catch((err) => sendJson(req, res, err.status === 404 ? 404 : err.status === 429 ? 429 : 502, { error: err.message }));
     return;
   }
+  if (url.pathname.startsWith('/api/drawings/')) {
+    // Wagenzeichnungen (reisezuege.ch) der geplanten Komposition eines Zugs
+    if (!tt) return sendJson(req, res, 503, { error: 'Fahrplan wird geladen …' });
+    if (!drawings) return sendJson(req, res, 404, { error: 'Wagenzeichnungen ausgeschaltet' });
+    const key = decodeURIComponent(url.pathname.slice('/api/drawings/'.length));
+    const trip = tt.trip(key, realtime);
+    if (!trip || trip.mode !== 'rail' || !/^\d+$/.test(trip.num || '')) return sendJson(req, res, 404, { error: 'keine Zeichnungen' });
+    const day = key.slice(key.lastIndexOf('|') + 1);
+    const weekday = new Date(Date.UTC(+day.slice(0, 4), +day.slice(4, 6) - 1, +day.slice(6, 8))).getUTCDay();
+    drawings.forDay(trip.num, weekday).then((block) => {
+      if (!block) return sendJson(req, res, 404, { error: 'reisezuege.ch kennt diesen Zug nicht' });
+      sendJson(req, res, 200, {
+        label: block.label,
+        page: `${REISEZUEGE}index.php?action=5&znummer=${trip.num}`,
+        wagons: block.wagons.map((w) => ({
+          img: `api/drawing/${w.file}`, name: w.name, cls: classOf(w.name),
+          url: w.id ? `${REISEZUEGE}index.php?action=9&tfah_id=${w.id}` : null,
+        })),
+      });
+    }).catch((err) => sendJson(req, res, 502, { error: err.message }));
+    return;
+  }
+  if (url.pathname.startsWith('/api/drawing/')) {
+    if (!drawings) return sendJson(req, res, 404, { error: 'Wagenzeichnungen ausgeschaltet' });
+    const name = url.pathname.slice('/api/drawing/'.length);
+    drawings.image(name).then((buf) => {
+      if (!buf) return sendJson(req, res, 404, { error: 'unbekanntes Bild' });
+      const type = { gif: 'image/gif', png: 'image/png' }[name.split('.').pop().toLowerCase()] || 'image/jpeg';
+      res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'public, max-age=2592000' });
+      res.end(buf);
+    }).catch((err) => sendJson(req, res, 502, { error: err.message }));
+    return;
+  }
   if (url.pathname === '/api/alerts') {
     // aktive Störungsmeldungen, wichtigste zuerst
     const order = ['NO_SERVICE', 'SIGNIFICANT_DELAYS', 'DETOUR', 'REDUCED_SERVICE', 'STOP_MOVED', 'MODIFIED_SERVICE', 'ADDITIONAL_SERVICE'];
@@ -241,6 +276,7 @@ const server = http.createServer((req, res) => {
       realtime: realtime.status,
       alerts: alerts.status,
       formation: formation.status,
+      drawings: drawings ? drawings.status : { enabled: false },
       legs: legStore ? { ...legStore.status, enabled: true } : { enabled: false },
     });
   }

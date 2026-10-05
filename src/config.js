@@ -54,6 +54,11 @@ export const config = {
   formationUrl: env.FORMATION_URL || 'https://api.opentransportdata.swiss/formation/v1/formations_full',
   formationApiKey: env.FORMATION_API_KEY || '',
   formationEnabled: env.FORMATION_ENABLED === '1',
+  // Wagenzeichnungen von reisezuege.ch (mit Erlaubnis), lokal zwischengespeichert
+  drawingsEnabled: env.REISEZUEGE !== '0',
+  drawingsDir: env.REISEZUEGE_DIR || 'data/reisezuege',
+  // beim Bauen des Images geladene Zeichnungen (scripts/fetch-drawings.js)
+  drawingsBundled: env.REISEZUEGE_BUNDLED || 'drawings',
   // Sprache der Meldungen (de, fr, it, en)
   alertsLang: env.ALERTS_LANG || 'de',
   // Protokoll der Extrafahrten (Zusatzfahrten aus GTFS-RT) der letzten 2 Tage
