@@ -25,6 +25,10 @@ bekannten Zugradar-Karten – **berechnet**:
    enthalten.
    Störungsmeldungen kommen aus GTFS-SA (alle 2 Minuten): Fahrzeuge betroffener Fahrten bzw. Linien tragen ein
    ⚠, die Detailansicht zeigt die Meldung und markiert betroffene Halte, „Störungen“ listet alle aktuellen.
+   „Komposition“ in der Detailansicht eines Zugs zeigt die Wagenreihung (Train Formation Service: Sektoren,
+   Klassen, Wagennummern, Rollstuhl-/Velo-/Familienplätze, Fahrzeugtyp). Abgefragt wird nur auf Klick, mit
+   10 Minuten Zwischenspeicher und Sperre vor dem Limit (50/min, 20 000/Tag). Betreiber: SBB, BLS, SOB, Thurbo,
+   RhB, TPF, transN, MBC, zb, ÖBB.
 3. Das Gleisnetz der Schweiz wird aus OpenStreetMap geladen (`railway=rail|narrow_gauge|light_rail|funicular`,
    ohne Rangiergleise). Für jedes Paar aufeinanderfolgender Halte sucht der Server per A* den Weg über die
    Gleise – über gerichtete Gleisabschnitte, sodass Züge an Weichen nicht „umkehren“ (max. 70° Richtungsänderung
@@ -85,7 +89,7 @@ Das Skript [`deploy/install.sh`](deploy/install.sh)
 4. startet App und Caddy mit `docker compose up -d --build`.
 
 Erneut ausführen aktualisiert die Installation; mit Enter bleibt der bisherige Key erhalten. Ohne Rückfragen:
-`DOMAIN=… GTFS_RT_API_KEY=… GTFS_SA_API_KEY=… bash install.sh`. Weitere Variablen: `INSTALL_DIR`, `BRANCH`.
+`DOMAIN=… GTFS_RT_API_KEY=… GTFS_SA_API_KEY=… FORMATION_API_KEY=… bash install.sh`. Weitere Variablen: `INSTALL_DIR`, `BRANCH`.
 
 **Von Hand:** Voraussetzungen sind Docker mit Compose-Plugin, die Ports 80 und 443 und ein DNS-Eintrag (A/AAAA)
 der Domain auf den Server. Mit allen Verkehrsmitteln braucht der Server im Betrieb rund 1,4 GB RAM und beim einmaligen Erstellen
@@ -139,6 +143,9 @@ Fahrplan und Prognose.
 | `GTFS_SA_URL` | `…/la/gtfs-sa` | Endpunkt der Störungsmeldungen |
 | `GTFS_SA_INTERVAL` | `120` | Abfrageintervall GTFS-SA in Sekunden |
 | `GTFS_SA_ENABLED` | – | `1` = auch ohne eigenen Key abfragen (Proxy ergänzt die Authentisierung) |
+| `FORMATION_API_KEY` | – | API-Key für den Train Formation Service (Zugkomposition; eigenes Produkt). Ohne Key kein Knopf „Komposition“ |
+| `FORMATION_URL` | `…/formation/v1/formations_full` | Endpunkt der Zugkomposition |
+| `FORMATION_ENABLED` | – | `1` = auch ohne eigenen Key abfragen (Proxy ergänzt die Authentisierung) |
 | `ALERTS_LANG` | `de` | Sprache der Meldungen (`de`, `fr`, `it`, `en`) |
 | `RAIL_ROUTING` | `1` | `0` = Gleisnetz nicht verwenden (Luftlinie) |
 | `RAIL_OSM_PATH` | – | Lokale Overpass-JSON-Datei mit dem Gleisnetz (statt Download) |
@@ -162,6 +169,7 @@ Fahrplan und Prognose.
   `null` = wird noch berechnet)
 - `GET /api/trip/<tripId>|<YYYYMMDD>` – Halteliste mit Soll- und Prognosezeiten und Streckenverlauf
 - `GET /api/extras?day=YYYYMMDD` – Protokoll der Extrafahrten eines Tages (Standard: heute), auch beendete
+- `GET /api/formation/<id>` – Zugkomposition einer Fahrt (Wagenreihung je Halt: Sektor, Klasse, Wagennummer, Angebote, Fahrzeugtyp)
 - `GET /api/alerts` – aktive Störungsmeldungen (GTFS-SA) mit betroffenen Linien und Halten, wichtigste zuerst
 - `GET /api/status` – Zustand von Fahrplan- und Echtzeit-Import
 

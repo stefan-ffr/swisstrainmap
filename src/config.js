@@ -49,6 +49,11 @@ export const config = {
   alertsEnabled: env.GTFS_SA_ENABLED === '1',
   alertsIntervalSeconds: Number(env.GTFS_SA_INTERVAL || 120),
   alertsCacheFile: env.GTFS_SA_CACHE_FILE || 'data/gtfs-sa.pb',
+  // Zugkomposition (Train Formation Service), eigener Key; abgefragt nur beim
+  // Öffnen einer Fahrt. Plan: 50 Abfragen/min, 20 000/Tag.
+  formationUrl: env.FORMATION_URL || 'https://api.opentransportdata.swiss/formation/v1/formations_full',
+  formationApiKey: env.FORMATION_API_KEY || '',
+  formationEnabled: env.FORMATION_ENABLED === '1',
   // Sprache der Meldungen (de, fr, it, en)
   alertsLang: env.ALERTS_LANG || 'de',
   // Protokoll der Extrafahrten (Zusatzfahrten aus GTFS-RT) der letzten 2 Tage

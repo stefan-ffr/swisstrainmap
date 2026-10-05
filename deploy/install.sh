@@ -5,10 +5,10 @@
 #
 # Installiert fehlende Pakete (git, curl, Docker mit Compose-Plugin) auf
 # Debian/Ubuntu, Fedora/RHEL/Rocky/Alma und Alpine, fragt Domain und
-# API-Keys (GTFS-RT, GTFS-SA) ab (Keys werden bei der Eingabe nicht angezeigt) und
+# API-Keys (GTFS-RT, GTFS-SA, Zugkomposition) ab (Keys werden bei der Eingabe nicht angezeigt) und
 # startet App + Caddy (HTTPS) mit docker compose.
 # Ohne Rückfragen, z. B. für Automatisierung:
-#   DOMAIN=… GTFS_RT_API_KEY=… GTFS_SA_API_KEY=… bash install.sh
+#   DOMAIN=… GTFS_RT_API_KEY=… GTFS_SA_API_KEY=… FORMATION_API_KEY=… bash install.sh
 # Weitere Variablen: INSTALL_DIR (Standard ~/swisstrainmap), BRANCH (main), REPO_URL.
 set -euo pipefail
 
@@ -18,6 +18,7 @@ INSTALL_DIR="${INSTALL_DIR:-$HOME/swisstrainmap}"
 DEFAULT_DOMAIN="swisstransportmap.juroct.net"
 RT_URL="https://api.opentransportdata.swiss/la/gtfs-rt"
 SA_URL="https://api.opentransportdata.swiss/la/gtfs-sa"
+FORMATION_URL_CHECK="https://api.opentransportdata.swiss/formation/v1/formations_full?evu=SBBP&operationDate=$(date +%F)&trainNumber=1"
 
 say() { printf '\033[1m%s\033[0m\n' "$*"; }
 warn() { printf '\033[33m%s\033[0m\n' "$*" >&2; }
@@ -26,7 +27,7 @@ die() { printf '\033[31mFehler: %s\033[0m\n' "$*" >&2; exit 1; }
 # Bei "curl | bash" ist stdin das Skript – Eingaben kommen vom Terminal.
 ask() { # ask <Variable> <Frage> [geheim]
   local __var="$1" __prompt="$2" __secret="${3:-}" __value=""
-  [ -r /dev/tty ] || die "Kein Terminal für Eingaben. Werte als Umgebungsvariablen übergeben (DOMAIN, GTFS_RT_API_KEY, GTFS_SA_API_KEY)."
+  [ -r /dev/tty ] || die "Kein Terminal für Eingaben. Werte als Umgebungsvariablen übergeben (DOMAIN, GTFS_RT_API_KEY, GTFS_SA_API_KEY, FORMATION_API_KEY)."
   if [ -n "$__secret" ]; then
     read -rs -p "$__prompt" __value </dev/tty; echo >/dev/tty
   else
@@ -131,7 +132,7 @@ ask_key() { # ask_key <Variable> <Beschreibung> <Prüf-URL>
   # Eine einzige Abfrage zählt gegen das Limit (je nach Plan 2–5/min) – unproblematisch.
   code="$(curl -s -o /dev/null -w '%{http_code}' -m 20 -H "Authorization: Bearer $value" "$url" || true)"
   case "$code" in
-    200|302) say "Key für $what funktioniert." ;;
+    200|302|400|404) say "Key für $what funktioniert." ;;
     401|403) warn "Key für $what wird abgelehnt (HTTP $code) – bitte im API-Manager prüfen. Installation läuft trotzdem weiter." ;;
     429) warn "Rate-Limit erreicht (HTTP 429) – Key für $what konnte nicht geprüft werden." ;;
     *) warn "Key für $what konnte nicht geprüft werden (HTTP ${code:-keine Antwort})." ;;
@@ -139,6 +140,7 @@ ask_key() { # ask_key <Variable> <Beschreibung> <Prüf-URL>
 }
 ask_key GTFS_RT_API_KEY "GTFS-RT (Echtzeit-Verspätungen; ohne Key Positionen nach Fahrplan)" "$RT_URL"
 ask_key GTFS_SA_API_KEY "GTFS-SA (Störungsmeldungen)" "$SA_URL"
+ask_key FORMATION_API_KEY "Train Formation Service (Zugkomposition)" "$FORMATION_URL_CHECK"
 
 # --- .env schreiben -------------------------------------------------------------
 umask 077
@@ -147,9 +149,10 @@ umask 077
   echo "DOMAIN=$DOMAIN"
   echo "GTFS_RT_API_KEY=$GTFS_RT_API_KEY"
   echo "GTFS_SA_API_KEY=$GTFS_SA_API_KEY"
-  grep -vE '^(#|DOMAIN=|GTFS_RT_API_KEY=|GTFS_SA_API_KEY=|$)' deploy/env.example
+  echo "FORMATION_API_KEY=$FORMATION_API_KEY"
+  grep -vE '^(#|DOMAIN=|GTFS_RT_API_KEY=|GTFS_SA_API_KEY=|FORMATION_API_KEY=|$)' deploy/env.example
   # eigene Ergänzungen aus einer bestehenden .env behalten
-  if [ -f .env ]; then grep -vE '^(#|DOMAIN=|GTFS_RT_API_KEY=|GTFS_SA_API_KEY=|GTFS_RT_INTERVAL=|MODES=|$)' .env || true; fi
+  if [ -f .env ]; then grep -vE '^(#|DOMAIN=|GTFS_RT_API_KEY=|GTFS_SA_API_KEY=|FORMATION_API_KEY=|GTFS_RT_INTERVAL=|MODES=|$)' .env || true; fi
 } > .env.new
 mv .env.new .env
 say ".env geschrieben (nur für den Besitzer lesbar)."

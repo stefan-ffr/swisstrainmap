@@ -102,6 +102,51 @@ function alertHtml(a, open = openAlerts.has(a.id)) {
   ].filter(Boolean).join('');
   return `<details class="alert" data-id="${esc(a.id)}" ${open ? 'open' : ''}><summary>⚠ ${esc(a.header || EFFECTS[a.effect] || 'Störung')} ${effect}${period}</summary>${more}</details>`;
 }
+// --- Zugkomposition (Train Formation Service) --------------------------------
+
+let formationEnabled = false;
+const formations = new Map(); // Fahrt-ID -> Antwort von /api/formation bzw. { error }
+let formationOpen = null; // Fahrt-ID, deren Komposition angezeigt wird
+let formationStop = null; // gewählter Halt (Name)
+const WAGON_LABEL = { 1: '1', 2: '2', 12: '1|2', LK: 'Lok', D: 'Gepäck', WR: '🍴', W1: '🍴 1', W2: '🍴 2', CC: 'Liege', WL: 'Schlaf', FA: 'Fam', FZ: 'Fam', K: '–', X: 'abg.' };
+const OFFERS = {
+  BHP: ['♿', 'Rollstuhlplätze'], NF: ['⤓', 'Niederflur-Einstieg'], VH: ['🚲', 'Velohaken'], VR: ['🚲ʳ', 'Velo: Reservation nötig'],
+  KW: ['👶', 'Kinderwagen-Plattform'], FZ: ['👪', 'Familienzone'], BZ: ['💼', 'Businesszone'], LA: ['🧳', 'Gepäck'],
+  WL: ['🛏', 'Schlafwagen'], CC: ['🛏', 'Liegewagen'],
+};
+
+function formationHtml(f, liveStop) {
+  if (f.error) return `<p class="sub">${esc(f.error)}</p>`;
+  if (!f.stops?.length) return '<p class="sub">Keine Kompositionsdaten.</p>';
+  const stop = f.stops.find((x) => x.name === formationStop) ?? f.stops.find((x) => x.name === liveStop) ?? f.stops[0];
+  const options = f.stops.map((x) => `<option ${x === stop ? 'selected' : ''}>${esc(x.name)}</option>`).join('');
+  let lastSector = null, lastUnit = null;
+  const cells = stop.wagons.map((w) => {
+    const head = w.sector && w.sector !== lastSector ? `<b class="sector">${esc(w.sector)}</b>` : '';
+    const gap = lastUnit !== null && w.unit !== lastUnit ? ' gap' : '';
+    lastSector = w.sector; lastUnit = w.unit;
+    const offers = w.offers.map((o) => OFFERS[o] ? `<span title="${OFFERS[o][1]}">${OFFERS[o][0]}</span>` : '').join('');
+    const title = [w.number ? `Wagen ${w.number}` : '', ...w.offers.map((o) => OFFERS[o]?.[1] ?? o), ...w.status].filter(Boolean).join(' · ');
+    return `<div class="wagon${gap}${w.status.length ? ' closed' : ''}${/^(1|W1)$/.test(w.type) ? ' first' : ''}" title="${esc(title)}">${head}<span class="cls">${esc(WAGON_LABEL[w.type] ?? w.type)}</span><small>${w.number ?? '&nbsp;'}</small><span class="offers">${offers}</span></div>`;
+  }).join('');
+  const goals = stop.goals.filter((g) => g.destination).map((g) => `Wagen ${g.from}–${g.to} → ${esc(g.destination)}`).join(' · ');
+  return `
+    <div class="sub">Am Halt <select id="formation-stop">${options}</select>${stop.track ? ` · Gleis ${esc(stop.track)}` : ''}</div>
+    <div class="train">${cells}</div>
+    <div class="sub">${f.types.length ? `Fahrzeuge: ${f.types.map(esc).join(', ')}` : ''}${goals ? `<br>${goals}` : ''}<br>Reihenfolge wie am Perron (Sektor A links)</div>`;
+}
+
+async function loadFormation(id) {
+  try {
+    const res = await fetch(`api/formation/${encodeURIComponent(id)}`);
+    const body = await res.json();
+    formations.set(id, res.ok ? body : { error: body.error || res.statusText });
+  } catch (err) {
+    formations.set(id, { error: err.message });
+  }
+  if (selectedId === id) showDetails(id);
+}
+
 // aufgeklappte Meldungen bleiben offen, auch wenn die Ansicht neu gezeichnet wird
 const openAlerts = new Set();
 document.addEventListener('toggle', (ev) => {
@@ -267,6 +312,7 @@ async function pollStatus() {
       ? `Echtzeit: ${rt.trips} Fahrten mit Prognose${rt.lastSuccess ? `, Stand ${fmtTime(Date.parse(rt.lastSuccess))}` : ''}`
       : 'Echtzeit aus – Positionen nach Fahrplan (GTFS_RT_API_KEY setzen)';
     if (rt.lastError) text += ` · Fehler: ${rt.lastError}`;
+    formationEnabled = !!s.formation?.enabled;
     if (s.alerts?.enabled && s.alerts.lastSuccess) {
       $('alerts-btn').hidden = false;
       $('alerts-btn').textContent = `Störungen (${s.alerts.alerts})`;
@@ -435,7 +481,9 @@ async function showDetails(id) {
     <div class="actions">
       <button id="follow-btn" class="link-btn" type="button" aria-pressed="${follow}">${follow ? 'Verfolgen: an' : 'Verfolgen'}</button>
       <button id="route-btn" class="link-btn" type="button">Ganze Strecke</button>
+      ${formationEnabled && trip.mode === 'rail' ? `<button id="formation-btn" class="link-btn" type="button" aria-pressed="${formationOpen === id}">Komposition</button>` : ''}
     </div>
+    ${formationOpen === id ? `<div id="formation">${formations.has(id) ? formationHtml(formations.get(id), live?.at || live?.next) : '<p class="sub">Lade Komposition …</p>'}</div>` : ''}
     ${(trip.alerts || []).slice(0, trip.alertsWhole).map((a) => alertHtml(a)).join('')}
     <table><tr><td></td><td class="t">an</td><td class="t">ab</td></tr>${rows}</table>
     ${trip.alerts?.length > trip.alertsWhole ? `<h3>Hinweise zu Halten</h3>${trip.alerts.slice(trip.alertsWhole).map((a) => alertHtml(a)).join('')}` : ''}`;
@@ -446,6 +494,15 @@ async function showDetails(id) {
     const marker = trains.get(id)?.marker;
     if (follow && marker) map.setView(marker.getLatLng(), Math.max(map.getZoom(), FOLLOW_ZOOM));
   };
+  if ($('formation-btn')) {
+    $('formation-btn').onclick = () => {
+      formationOpen = formationOpen === id ? null : id;
+      formationStop = null;
+      if (formationOpen && !formations.has(id)) loadFormation(id);
+      showDetails(id);
+    };
+  }
+  if ($('formation-stop')) $('formation-stop').onchange = (ev) => { formationStop = ev.target.value; showDetails(id); };
   $('route-btn').onclick = () => {
     setFollow(false);
     map.fitBounds(line.getBounds(), { paddingTopLeft: [window.innerWidth > 600 ? 360 : 20, 40], paddingBottomRight: [40, 40] });

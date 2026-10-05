@@ -11,6 +11,7 @@ import { ensureExtractInWorker } from './extract-worker.js';
 import { Timetable } from './timetable.js';
 import { RealtimeStore } from './realtime.js';
 import { AlertStore } from './alerts.js';
+import { FormationService, evuOf } from './formation.js';
 import { timetableYear, todayKey } from './time.js';
 import { loadForeignFeeds, extendWithForeign } from './foreign.js';
 import { LegStore } from './legs.js';
@@ -23,6 +24,7 @@ const log = (msg) => console.log(`[${new Date().toISOString()}] ${msg}`);
 const state = { timetable: null, loading: false, loadedAt: null, loadError: null };
 const realtime = new RealtimeStore();
 const alerts = new AlertStore(config.alertsLang);
+const formation = new FormationService({ url: config.formationUrl, apiKey: config.formationApiKey, enabled: config.formationEnabled, log });
 const extraLog = new ExtraLog(path.resolve(root, config.extrasFile), log);
 const extraLogLoaded = extraLog.load();
 
@@ -205,6 +207,23 @@ const server = http.createServer((req, res) => {
     const day = Number(url.searchParams.get('day')) || todayKey(Date.now(), config.timeZone);
     return sendJson(req, res, 200, { day, extras: extraLog.forDay(day) });
   }
+  if (url.pathname.startsWith('/api/formation/')) {
+    // Zugkomposition einer Fahrt (nur Züge von Betreibern, die der Dienst kennt)
+    if (!tt) return sendJson(req, res, 503, { error: 'Fahrplan wird geladen …' });
+    if (!formation.enabled) return sendJson(req, res, 404, { error: 'Zugkomposition nicht eingerichtet (FORMATION_API_KEY)' });
+    const key = decodeURIComponent(url.pathname.slice('/api/formation/'.length));
+    const trip = tt.trip(key, realtime);
+    const evu = trip && evuOf(trip.op);
+    if (!trip || trip.mode !== 'rail' || !evu || !/^\d+$/.test(trip.num || '')) {
+      return sendJson(req, res, 404, { error: 'Für diesen Zug gibt es keine Kompositionsdaten' });
+    }
+    const day = String(key.slice(key.lastIndexOf('|') + 1));
+    const date = `${day.slice(0, 4)}-${day.slice(4, 6)}-${day.slice(6, 8)}`;
+    formation.get(evu, date, trip.num)
+      .then((data) => sendJson(req, res, 200, { evu, date, trainNumber: trip.num, ...data }))
+      .catch((err) => sendJson(req, res, err.status === 404 ? 404 : err.status === 429 ? 429 : 502, { error: err.message }));
+    return;
+  }
   if (url.pathname === '/api/alerts') {
     // aktive Störungsmeldungen, wichtigste zuerst
     const order = ['NO_SERVICE', 'SIGNIFICANT_DELAYS', 'DETOUR', 'REDUCED_SERVICE', 'STOP_MOVED', 'MODIFIED_SERVICE', 'ADDITIONAL_SERVICE'];
@@ -221,6 +240,7 @@ const server = http.createServer((req, res) => {
       },
       realtime: realtime.status,
       alerts: alerts.status,
+      formation: formation.status,
       legs: legStore ? { ...legStore.status, enabled: true } : { enabled: false },
     });
   }
