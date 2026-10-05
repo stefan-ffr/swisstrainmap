@@ -85,7 +85,7 @@ Das Skript [`deploy/install.sh`](deploy/install.sh)
 4. startet App und Caddy mit `docker compose up -d --build`.
 
 Erneut ausführen aktualisiert die Installation; mit Enter bleibt der bisherige Key erhalten. Ohne Rückfragen:
-`DOMAIN=… GTFS_RT_API_KEY=… bash install.sh`. Weitere Variablen: `INSTALL_DIR`, `BRANCH`.
+`DOMAIN=… GTFS_RT_API_KEY=… GTFS_SA_API_KEY=… bash install.sh`. Weitere Variablen: `INSTALL_DIR`, `BRANCH`.
 
 **Von Hand:** Voraussetzungen sind Docker mit Compose-Plugin, die Ports 80 und 443 und ein DNS-Eintrag (A/AAAA)
 der Domain auf den Server. Mit allen Verkehrsmitteln braucht der Server im Betrieb rund 1,4 GB RAM und beim einmaligen Erstellen
@@ -94,7 +94,7 @@ Fahrplan, Auszug und Gleisnetz zusammen etwa 1,5 GB in `./data`.
 
 ```bash
 git clone https://github.com/stefan-ffr/swisstrainmap.git && cd swisstrainmap
-cp deploy/env.example .env      # Domain und GTFS_RT_API_KEY eintragen
+cp deploy/env.example .env      # Domain und API-Keys eintragen
 docker compose up -d --build
 docker compose logs -f app      # erster Start: Download + Auszug ≈ 3–4 Minuten
 ```
@@ -135,10 +135,10 @@ Fahrplan und Prognose.
 | `GTFS_RT_INTERVAL` | `35` | Abfrageintervall GTFS-RT in Sekunden (Minimum 12; beim Plan mit 5 Abfragen/min z. B. `15`) |
 | `EXTRAS_FILE` | `data/extras.json` | Protokoll der Extrafahrten (letzte 2 Tage) |
 | `GTFS_RT_CACHE_FILE` | `data/gtfs-rt.pb` | Letzter GTFS-RT-Feed (für Neustarts) |
-| `GTFS_SA_API_KEY` | = `GTFS_RT_API_KEY` | Key für GTFS-SA (Störungsmeldungen). Meist derselbe Key: im API-Manager die Anwendung zusätzlich für «GTFS Service Alerts» abonnieren |
+| `GTFS_SA_API_KEY` | – | API-Key für GTFS-SA (Störungsmeldungen; eigenes Produkt im API-Manager, eigener Key). Ohne Key keine Störungsmeldungen |
 | `GTFS_SA_URL` | `…/la/gtfs-sa` | Endpunkt der Störungsmeldungen |
 | `GTFS_SA_INTERVAL` | `120` | Abfrageintervall GTFS-SA in Sekunden |
-| `GTFS_SA_ENABLED` | = `GTFS_RT_ENABLED` | `1` = auch ohne eigenen Key abfragen (Proxy ergänzt die Authentisierung) |
+| `GTFS_SA_ENABLED` | – | `1` = auch ohne eigenen Key abfragen (Proxy ergänzt die Authentisierung) |
 | `ALERTS_LANG` | `de` | Sprache der Meldungen (`de`, `fr`, `it`, `en`) |
 | `RAIL_ROUTING` | `1` | `0` = Gleisnetz nicht verwenden (Luftlinie) |
 | `RAIL_OSM_PATH` | – | Lokale Overpass-JSON-Datei mit dem Gleisnetz (statt Download) |
