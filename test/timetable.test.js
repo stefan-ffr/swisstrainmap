@@ -170,3 +170,9 @@ test('Protokoll der Extrafahrten: bleibt nach Ende der Fahrt und nach Neustart e
   logB.prune(20261010); // eine Woche später: weg
   assert.equal(logB.forDay(DAY).length, 0);
 });
+
+test('Fahrplanjahr wechselt am Sonntag zwischen 10. und 16. Dezember', async () => {
+  const { timetableYear } = await import('../src/time.js');
+  assert.deepEqual([20251213, 20251214, 20261005, 20261212, 20261213, 20271212].map(timetableYear),
+    [2025, 2026, 2026, 2026, 2027, 2028]);
+});

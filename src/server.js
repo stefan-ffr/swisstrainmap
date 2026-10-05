@@ -58,7 +58,7 @@ async function reload() {
   state.loading = true;
   try {
     const file = config.gtfsPath
-      || await ensureDownloaded(config.gtfsUrl, path.resolve(root, config.gtfsCacheFile), config.gtfsMaxAgeHours, log);
+      || await ensureDownloaded(config.gtfsUrl.replace('{year}', timetableYear(todayKey(Date.now(), config.timeZone))), path.resolve(root, config.gtfsCacheFile), config.gtfsMaxAgeHours, log);
     let source = path.resolve(root, file);
     try {
       source = await ensureExtractInWorker(source, path.resolve(root, config.gtfsExtractDir), config.routeTypes, log);

@@ -51,12 +51,15 @@ export async function ensureDownloaded(url, cacheFile, checkHours, log = console
   const sourceFile = `${cacheFile}.source`;
   let stat = null;
   try { stat = await fsp.stat(cacheFile); } catch { /* noch kein Cache */ }
+  // Zeile 1: geladene Version, Zeile 2: angefragte URL (ändert sich z. B. mit
+  // dem Fahrplanjahr – dann sofort prüfen)
+  const [known = null, knownUrl = url] = (await fsp.readFile(sourceFile, 'utf8').catch(() => '')).split('\n').filter(Boolean);
   const checked = await fsp.stat(sourceFile).then((s) => s.mtimeMs).catch(() => stat?.mtimeMs ?? 0);
-  if (stat && (Date.now() - checked) / 3600e3 < checkHours) return cacheFile;
+  if (stat && knownUrl === url && (Date.now() - checked) / 3600e3 < checkHours) return cacheFile;
 
-  let target = url;
+  let target = url, head;
   try {
-    const head = await fetch(url, { method: 'HEAD', redirect: 'manual' });
+    head = await fetch(url, { method: 'HEAD', redirect: 'manual' });
     const location = head.headers.get('location');
     if (head.status >= 300 && head.status < 400 && location) target = new URL(location, url).href;
   } catch (err) {
@@ -66,8 +69,18 @@ export async function ensureDownloaded(url, cacheFile, checkHours, log = console
     }
     throw err;
   }
-  const known = await fsp.readFile(sourceFile, 'utf8').catch(() => null);
-  if (stat && target !== url && known === target) {
+  // Ohne Weiterleitung (z. B. ÖBB, gtfs.de) erkennt man eine neue Version an
+  // ETag bzw. Last-Modified.
+  let version = target;
+  if (target === url) {
+    if (!head.ok && stat) {
+      log(`GTFS: Versionsprüfung fehlgeschlagen (HTTP ${head.status}) – verwende vorhandenen Fahrplan`);
+      return cacheFile;
+    }
+    const validator = head.headers.get('etag') || head.headers.get('last-modified');
+    if (validator) version = `${target} ${validator}`;
+  }
+  if (stat && version !== url && known === version) {
     const now = new Date();
     await fsp.utimes(sourceFile, now, now); // nächste Prüfung erst nach checkHours
     log(`GTFS: Fahrplan ist aktuell (${path.basename(new URL(target).pathname)})`);
@@ -81,7 +94,7 @@ export async function ensureDownloaded(url, cacheFile, checkHours, log = console
   const tmp = `${cacheFile}.part`;
   await pipeline(Readable.fromWeb(res.body), fs.createWriteStream(tmp));
   await fsp.rename(tmp, cacheFile);
-  await fsp.writeFile(sourceFile, target);
+  await fsp.writeFile(sourceFile, `${version}\n${url}\n`);
   log(`GTFS: gespeichert unter ${cacheFile}`);
   return cacheFile;
 }

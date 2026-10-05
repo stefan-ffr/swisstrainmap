@@ -73,3 +73,13 @@ export function parseGtfsTime(s) {
 }
 
 export { DAY };
+
+/**
+ * Fahrplanjahr eines Tages (JJJJMMTT): Der Fahrplanwechsel ist am Sonntag
+ * zwischen dem 10. und 16. Dezember, ab dann gilt das Fahrplanjahr + 1.
+ */
+export function timetableYear(day) {
+  const y = Math.floor(day / 10000);
+  const firstSunday = 10 + ((7 - new Date(Date.UTC(y, 11, 10)).getUTCDay()) % 7);
+  return day >= y * 10000 + 1200 + firstSunday ? y + 1 : y;
+}

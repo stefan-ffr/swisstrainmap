@@ -10,7 +10,7 @@ import path from 'node:path';
 import { ensureDownloaded, openGtfs } from './gtfs-source.js';
 import { loadGtfs } from './gtfs-loader.js';
 import { modeFilter } from './modes.js';
-import { serviceDayStart } from './time.js';
+import { serviceDayStart, timetableYear } from './time.js';
 
 const TOLERANCE = 180;   // s: gleiche Zeit am gemeinsamen Halt
 const SAME_PLACE = 600;  // m: gleicher Bahnhof (Koordinaten aus verschiedenen Quellen)
@@ -24,7 +24,9 @@ const dist = (lat1, lon1, lat2, lon2) =>
 /** Lädt die ausländischen Fahrpläne (nur Bahn) für das Datumsfenster. */
 export async function loadForeignFeeds(feeds, { dataDir, centerDay, checkHours, log = console.log }) {
   const out = [];
-  for (const { name, url } of feeds) {
+  for (const { name, url: template } of feeds) {
+    // {year}: Fahrplanjahr, z. B. für die ÖBB-Dateien GTFS_Fahrplan_2026.zip
+    const url = template.replace('{year}', timetableYear(centerDay));
     try {
       const file = await ensureDownloaded(url, path.join(dataDir, `foreign-${name}.zip`), checkHours, log);
       const src = await openGtfs(file);

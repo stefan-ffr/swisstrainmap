@@ -33,3 +33,31 @@ test('Versionsprüfung lädt nur neue Fahrplan-Versionen und lässt die ZIP-Date
     srv.close();
   }
 });
+
+test('Ohne Weiterleitung entscheidet Last-Modified über eine neue Version', async () => {
+  let modified = 'Fri, 12 Dec 2025 09:02:01 GMT', downloads = 0, status = 200;
+  const srv = http.createServer((req, res) => {
+    res.writeHead(status, { 'last-modified': modified });
+    if (req.method === 'GET') downloads++;
+    res.end(req.method === 'GET' ? `zip ${downloads}` : undefined);
+  });
+  await new Promise((r) => srv.listen(0, r));
+  const url = `http://localhost:${srv.address().port}/GTFS_Fahrplan_2026.zip`;
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'dl-')), 'foreign-at.zip');
+  const log = () => {};
+  try {
+    await ensureDownloaded(url, file, 0, log);
+    await ensureDownloaded(url, file, 0, log); // unverändert
+    assert.equal(downloads, 1);
+    modified = 'Mon, 05 Oct 2026 08:00:00 GMT';
+    await ensureDownloaded(url, file, 0, log);
+    assert.equal(downloads, 2);
+    await ensureDownloaded(url.replace('2026', '2027'), file, 24, log); // neues Fahrplanjahr: sofort prüfen
+    assert.equal(downloads, 3);
+    status = 404; // Datei verschwunden: vorhandene weiterverwenden
+    assert.equal(await ensureDownloaded(url, file, 0, log), file);
+    assert.equal(downloads, 3);
+  } finally {
+    srv.close();
+  }
+});
