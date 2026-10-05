@@ -54,7 +54,13 @@ export async function startPolling({
       }
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
       const buffer = Buffer.from(await res.arrayBuffer());
-      ingest(buffer);
+      try {
+        ingest(buffer);
+      } catch (err) {
+        // Format unklar: Typ und Anfang der Antwort melden (ohne Steuerzeichen)
+        const head = buffer.subarray(0, 80).toString('latin1').replace(/[^\x20-\x7e]/g, '·');
+        throw new Error(`${err.message} (${res.headers.get('content-type') || 'ohne Content-Type'}, ${buffer.length} Bytes, beginnt mit «${head}»)`);
+      }
       status.lastSuccess = new Date().toISOString();
       status.lastError = null;
       onUpdate();

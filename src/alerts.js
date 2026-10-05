@@ -27,6 +27,15 @@ function pick(translated, lang) {
   return (by(lang) ?? by('de') ?? list.find((t) => !t.language) ?? list[0])?.text?.trim() || '';
 }
 
+// header_text -> headerText (Protobuf-JSON mit Originalnamen)
+function camelize(v) {
+  if (Array.isArray(v)) return v.map(camelize);
+  if (!v || typeof v !== 'object') return v;
+  const out = {};
+  for (const [key, val] of Object.entries(v)) out[key.replace(/_([a-z])/g, (_, c) => c.toUpperCase())] = camelize(val);
+  return out;
+}
+
 const sec = (v) => (v === null || v === undefined || Number(v) === 0 ? null : Number(v) * 1000);
 
 export class AlertStore {
@@ -79,8 +88,15 @@ export class AlertStore {
     this.status.alerts = alerts.length;
   }
 
+  /** Protobuf oder GTFS-RT als JSON (snake_case oder camelCase). */
   ingestBuffer(buffer) {
-    this.ingest(FeedMessage.toObject(FeedMessage.decode(new Uint8Array(buffer)), { longs: Number }));
+    const bytes = new Uint8Array(buffer);
+    let k = 0;
+    while (k < bytes.length && (bytes[k] === 0x20 || bytes[k] === 0x0a || bytes[k] === 0x0d || bytes[k] === 0x09 || bytes[k] === 0xef || bytes[k] === 0xbb || bytes[k] === 0xbf)) k++;
+    const message = bytes[k] === 0x7b // «{»
+      ? FeedMessage.fromObject(camelize(JSON.parse(Buffer.from(bytes).toString('utf8').replace(/^\uFEFF/, ''))))
+      : FeedMessage.decode(bytes);
+    this.ingest(FeedMessage.toObject(message, { longs: Number }));
   }
 
   static isActive(a, nowMs) {

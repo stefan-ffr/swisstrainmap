@@ -212,3 +212,24 @@ test('Störungsmeldungen (GTFS-SA) zu Linie, Halt und Fahrt', async () => {
   assert.equal(detail.alerts[0].routes[0], 'IR70');
   assert.equal(detail.alerts[1].stops[0].name, 'Zug');
 });
+
+test('GTFS-SA auch als JSON (snake_case)', async () => {
+  const { AlertStore } = await import('../src/alerts.js');
+  const json = JSON.stringify({
+    header: { gtfs_realtime_version: '2.0', timestamp: '1791200000' },
+    entity: [{ id: 'x', alert: {
+      active_period: [{ start: '1791190000', end: '1791290000' }],
+      informed_entity: [{ route_id: 'IR70' }, { stop_id: 'ch:1:sloid:3000:7:12' }],
+      cause: 'CONSTRUCTION', effect: 'DETOUR',
+      header_text: { translation: [{ text: 'Umleitung', language: 'de' }] },
+    } }],
+  });
+  const alerts = new AlertStore('de');
+  alerts.ingestBuffer(Buffer.from(`﻿${json}`));
+  const [a] = alerts.alerts;
+  assert.equal(a.header, 'Umleitung');
+  assert.equal(a.effect, 'DETOUR');
+  assert.equal(a.cause, 'CONSTRUCTION');
+  assert.deepEqual(a.routes, ['IR70']);
+  assert.equal(alerts.forStop('8503000:0:7', 1791200000000).length, 1);
+});
