@@ -118,12 +118,20 @@ export class FormationService {
             : res.status === 404 || res.status === 204 ? 'keine Kompositionsdaten für diesen Zug' : `${res.status} ${text}`;
           throw Object.assign(new Error(msg), { status: res.status === 204 ? 404 : res.status });
         }
-        const value = simplify(await res.json());
+        const text = await res.text();
+        if (!text.trim()) throw Object.assign(new Error('keine Kompositionsdaten für diesen Zug'), { status: 404 });
+        const json = JSON.parse(text);
+        const value = simplify(json);
+        if (!value.stops.length) {
+          // Format prüfen: welche Felder kamen an?
+          this.log(`Zugkomposition ${evu} ${trainNumber} ${date}: keine Wagen erkannt – Antwort (${res.status}, ${text.length} Bytes) beginnt mit ${text.slice(0, 300).replace(/\s+/g, ' ')}`);
+        }
         this.cache.set(key, { until: Date.now() + 10 * 60_000, value });
         return value;
       } catch (err) {
         err.status ??= 502;
         this.status.lastError = `${new Date().toISOString()}: ${err.message}`;
+        this.log(`Zugkomposition ${evu} ${trainNumber} ${date}: ${err.message}`);
         // «gibt es nicht» länger merken, Fehler kurz
         this.cache.set(key, { until: Date.now() + (err.status === 404 ? 3600_000 : 60_000), error: err });
         throw err;
