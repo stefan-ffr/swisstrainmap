@@ -57,6 +57,10 @@ export const config = {
   roadRouting: env.ROAD_ROUTING !== '0',
   roadOsmPath: env.ROAD_OSM_PATH || '',
   roadOsmCacheFile: env.ROAD_OSM_CACHE_FILE || 'data/road-osm.json',
+  // Schiffe auf den OSM-Schiffskursen (route=ferry) statt in Luftlinie.
+  shipRouting: env.SHIP_ROUTING !== '0',
+  shipOsmPath: env.SHIP_OSM_PATH || '',
+  shipOsmCacheFile: env.SHIP_OSM_CACHE_FILE || 'data/water-osm.json',
 
   // Fahrten ohne Halt in diesem Gebiet (Süd, West, Nord, Ost) werden ignoriert.
   bbox: list(env.BBOX || '45.75,5.85,47.85,10.55').map(Number),

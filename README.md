@@ -36,8 +36,10 @@ bekannten Zugradar-Karten – **berechnet**:
    Bergbahnen ab 11, Trams ab 12, Busse ab 13) und nur für den sichtbaren Ausschnitt (`/api/trains?modes=…&bbox=…`).
    Trams, Metro und Standseilbahnen fahren wie Züge auf den OSM-Gleisen. Busse fahren auf den Strassen, die in
    OSM als Buslinien (`route=bus`/`trolleybus`) eingetragen sind – Einbahnstrassen werden beachtet (ausser mit
-   Busausnahme), rechtwinkliges Abbiegen ist erlaubt, Wenden nicht. Schiffe und Luftseilbahnen fahren in
-   Luftlinie zwischen den Halten.
+   Busausnahme), rechtwinkliges Abbiegen ist erlaubt, Wenden nicht. Schiffe folgen den in OSM gezeichneten
+   Schiffskursen (`route=ferry`, ~700 Wege, ~1 MB; Kurse, die am selben Steg enden, werden verbunden) –
+   so fahren sie z. B. durch den Aarekanal nach Interlaken statt übers Land. Fehlt ein Kurs und wäre der
+   Weg über andere Stege mehr als dreimal so lang, gilt die Luftlinie. Luftseilbahnen fahren in Luftlinie.
 6. Der Browser holt die Geometrie der Abschnitte einmalig (`/api/legs`), interpoliert die Position entlang der
    Gleise und animiert die Züge flüssig; neue Positionsdaten alle 10 s.
 
@@ -141,6 +143,9 @@ Fahrplan und Prognose.
 | `ROAD_ROUTING` | `1` | `0` = Busse in Luftlinie statt auf den Strassen der OSM-Buslinien |
 | `ROAD_OSM_PATH` | – | Lokale Overpass-JSON-Datei mit dem Busnetz (statt Download) |
 | `ROAD_OSM_CACHE_FILE` | `data/road-osm.json` | Ablage des heruntergeladenen Busnetzes (~190 MB) |
+| `SHIP_ROUTING` | `1` | `0` = Schiffe in Luftlinie statt auf den OSM-Schiffskursen |
+| `SHIP_OSM_PATH` | – | Lokale Overpass-JSON-Datei mit den Schiffskursen (statt Download) |
+| `SHIP_OSM_CACHE_FILE` | `data/water-osm.json` | Ablage der heruntergeladenen Schiffskurse |
 
 ## API
 

@@ -25,7 +25,7 @@ export class Timetable {
       const { lat, lon } = data.stops;
       for (const trip of data.trips.values()) {
         const network = legStore.networks.has(NETWORK_OF[trip.route.mode ?? 'rail']) ? NETWORK_OF[trip.route.mode ?? 'rail'] : null;
-        if (!network) continue; // Schiff, Seilbahn (oder abgeschaltetes Netz): Luftlinie
+        if (!network) continue; // Seilbahn (oder abgeschaltetes Netz): Luftlinie
         trip.leg = new Int32Array(trip.stop.length - 1);
         for (let k = 0; k < trip.leg.length; k++) {
           const a = trip.stop[k], b = trip.stop[k + 1];

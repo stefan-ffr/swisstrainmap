@@ -10,7 +10,7 @@ import { loadGtfs } from './gtfs-loader.js';
 import { ensureExtractInWorker } from './extract-worker.js';
 import { Timetable } from './timetable.js';
 import { RealtimeStore } from './realtime.js';
-import { todayKey } from './time.js';
+import { timetableYear, todayKey } from './time.js';
 import { loadForeignFeeds, extendWithForeign } from './foreign.js';
 import { LegStore } from './legs.js';
 import { ExtraLog } from './extras.js';
@@ -33,11 +33,12 @@ async function recordExtras() {
   extraLog.prune(todayKey(Date.now(), config.timeZone));
   extraLog.record(tt.added.values(), (trip) => tt.expectedTimes(trip, trip.day, trip.dayStart, realtime), tt.data.stops);
 }
-const networks = [config.railRouting && 'rail', config.roadRouting && 'road'].filter(Boolean);
+const networks = [config.railRouting && 'rail', config.roadRouting && 'road', config.shipRouting && 'water'].filter(Boolean);
 const legStore = networks.length ? new LegStore(path.resolve(root, config.railLegsCacheFile), log, networks) : null;
 const NETWORK_SOURCES = {
   rail: { path: config.railOsmPath, cache: config.railOsmCacheFile },
   road: { path: config.roadOsmPath, cache: config.roadOsmCacheFile },
+  water: { path: config.shipOsmPath, cache: config.shipOsmCacheFile },
 };
 const legCacheLoaded = legStore?.loadCache();
 

@@ -18,6 +18,11 @@ export const ROAD_QUERY = `[out:json][timeout:900][maxsize:2000000000];
 rel["route"~"^(bus|trolleybus)$"](${BBOX});
 way(r)["highway"];
 out body qt; >; out skel qt;`;
+// Schiffskurse: In OSM ist jede Verbindung als Weg route=ferry von Steg zu Steg
+// über das Wasser gezeichnet (z. B. «Genève - Yvoire").
+export const WATER_QUERY = `[out:json][timeout:900][maxsize:2000000000];
+way["route"="ferry"](${BBOX});
+out body qt; >; out skel qt;`;
 
 const deg = (d) => Math.cos((d * Math.PI) / 180);
 
@@ -33,10 +38,16 @@ const deg = (d) => Math.cos((d * Math.PI) / 180);
  *    können an Weichen nicht umkehren; Busse biegen rechtwinklig ab, wenden
  *    aber nicht.
  *  - oneway: Einbahnstrassen beachten (ausser oneway:bus/psv=no).
+ *  - join: Wegenden, die nicht mit dem Netz verbunden sind, mit Netzpunkten
+ *    im Umkreis (m) verbinden – die Fährwege der einzelnen Kurse enden am Steg
+ *    meist nur nahe beieinander statt im gleichen Knoten.
+ *  - maxDetour: längere Wege verwerfen (Luftlinie statt Umweg über andere
+ *    Stege, wenn ein Kurs in OSM fehlt).
  */
 export const PROFILES = {
   rail: { name: 'Gleisnetz', query: OVERPASS_QUERY, snap: 300, fallback: 2000, max: 500, turns: [70, 110].map(deg), oneway: false },
   road: { name: 'Busnetz', query: ROAD_QUERY, snap: 80, fallback: 400, max: 60, turns: [150, 175].map(deg), oneway: true },
+  water: { name: 'Schiffsnetz', query: WATER_QUERY, snap: 400, fallback: 1500, max: 100, turns: [120, 170].map(deg), oneway: false, join: 250, maxDetour: 3 },
 };
 
 // Weg vom Haltepunkt zum Netz zählt mehrfach, damit das Fahrzeug am Halt
@@ -139,6 +150,34 @@ function onewayOf(tags) {
   return 0;
 }
 
+/** Verbindet Wegenden mit allen Netzpunkten im Umkreis join (m), ergänzt pairs. */
+function joinEnds(ends, lat, lon, pairs, join) {
+  const kx = 111320 * Math.cos((46.8 * Math.PI) / 180), ky = 110540;
+  const cell = join / ky, grid = new Map();
+  const key = (r, c) => r * 100000 + c;
+  for (let i = 0; i < lat.length; i++) {
+    const k = key(Math.floor(lat[i] / cell), Math.floor(lon[i] / cell));
+    if (!grid.has(k)) grid.set(k, []);
+    grid.get(k).push(i);
+  }
+  const linked = new Set();
+  for (let k = 0; k < pairs.length; k += 3) linked.add(pairs[k] * 1e7 + pairs[k + 1]);
+  for (const end of ends.flat()) {
+    if (end === undefined) continue;
+    const r = Math.floor(lat[end] / cell), c = Math.floor(lon[end] / cell);
+    for (let i = r - 1; i <= r + 1; i++) {
+      for (let j = c - 2; j <= c + 2; j++) {
+        for (const v of grid.get(key(i, j)) ?? []) {
+          if (v === end || linked.has(end * 1e7 + v) || linked.has(v * 1e7 + end)) continue;
+          if (Math.hypot((lon[v] - lon[end]) * kx, (lat[v] - lat[end]) * ky) > join) continue;
+          pairs.push(end, v, 0);
+          linked.add(end * 1e7 + v);
+        }
+      }
+    }
+  }
+}
+
 export class RailNetwork {
   /**
    * @param osm     Overpass-JSON ({ elements }) oder { nodes: Map(id -> [lat, lon]), ways: [{ nodes, oneway }] }
@@ -171,6 +210,7 @@ export class RailNetwork {
       }
     }
     const n = lat.length;
+    if (profile.join) joinEnds(ways.map((w) => [idx(w.nodes[0]), idx(w.nodes.at(-1))]), lat, lon, pairs, profile.join);
 
     this.lat = Float64Array.from(lat);
     this.lon = Float64Array.from(lon);
@@ -248,9 +288,18 @@ export class RailNetwork {
   route(a, b) {
     for (const minCos of this.profile.turns) {
       const path = this.search(a, b, minCos);
+      if (path && this.profile.maxDetour && this.length(path) > this.profile.maxDetour * this.length([a, b]) + 500) return null;
       if (path) return path;
     }
     return null;
+  }
+
+  length(coords) {
+    let sum = 0;
+    for (let i = 1; i < coords.length; i++) {
+      sum += Math.hypot((coords[i][1] - coords[i - 1][1]) * this.kx, (coords[i][0] - coords[i - 1][0]) * this.ky);
+    }
+    return sum;
   }
 
   search(a, b, minCos) {
