@@ -124,7 +124,7 @@ Fahrplan und Prognose.
 | `GTFS_CACHE_FILE` | `data/gtfs.zip` | Ablage des heruntergeladenen Fahrplans |
 | `GTFS_MAX_AGE_HOURS` | `6` | So oft wird geprüft, ob der Permalink auf eine neue Fahrplan-Version zeigt; nur dann wird neu geladen |
 | `MODES` | `rail,tram,metro,bus,ship,cable,funicular` | Verkehrsmittel, die geladen werden (z. B. nur `rail` für eine reine Zugkarte) |
-| `FOREIGN_GTFS` | `de=…gtfs.de…,fr=…sncf…,at=…oebb…` | Fahrpläne der Nachbarländer (`Name=URL`, kommagetrennt; leer = aus; `{year}` = Fahrplanjahr) |
+| `FOREIGN_GTFS` | `de=…gtfs.de…,fr=…sncf…,at=…oebb…,it=…trenitalia…` | Fahrpläne der Nachbarländer (`Name=URL`, kommagetrennt; leer = aus; `{year}` = Fahrplanjahr) |
 | `FOREIGN_GTFS_MAX_AGE_HOURS` | `24` | So oft wird geprüft, ob es neue ausländische Fahrpläne gibt (geladen wird nur bei Änderung) |
 | `GTFS_EXTRACT_DIR` | `data/gtfs-extract` | Auszug für die gewählten Verkehrsmittel, einmal pro Fahrplan-Version erstellt |
 | `GTFS_RT_URL` | `https://api.opentransportdata.swiss/la/gtfs-rt` | GTFS-RT-Endpunkt |
@@ -176,9 +176,13 @@ test/                      Tests (npm test)
 ## Grenzen & Ideen für später
 
 - **Internationale Züge:** Der Schweizer Fahrplan enthält z. B. den ICE 100 nur bis Basel Bad Bf. Der Server lädt
-  deshalb zusätzlich die Fahrpläne aus Deutschland (gtfs.de/DELFI, Fernverkehr), Frankreich (SNCF) und Österreich (ÖBB-Sollfahrplan) und hängt
+  deshalb zusätzlich die Fahrpläne aus Deutschland (gtfs.de/DELFI, Fernverkehr), Frankreich (SNCF), Österreich (ÖBB-Sollfahrplan) und Italien (Trenitalia) und hängt
   den Laufweg im Ausland an, wenn eine ausländische Fahrt am End- bzw. Anfangshalt und am Halt davor bzw. danach
-  zur gleichen Zeit hält (±3 Min.). Für Italien gibt es keine offene Quelle; Echtzeit gilt nur für den Schweizer Teil.
+  zur gleichen Zeit hält (±3 Min.). Die Verlängerung endet vor dem ersten Halt, der wieder in der Schweiz liegt
+  (Landesgrenze aus OSM in `src/switzerland.json`) – diese Abschnitte führt der Schweizer Fahrplan schon selbst.
+  Trenitalia veröffentlicht nur NeTEx; den GTFS-Feed wandelt das Projekt
+  [deryclem/trenitalia-gtfs](https://github.com/deryclem/trenitalia-gtfs) wöchentlich daraus um. Echtzeit gilt nur
+  für den Schweizer Teil.
   Im Ausland fahren die Züge auf der Luftlinie zwischen den Halten.
 - **Streckenwahl geschätzt:** Der Schweizer GTFS-Feed enthält keine `shapes.txt` und keine Durchfahrtspunkte.
   Zwischen zwei Halten wird daher der kürzeste Weg auf den Gleisen angenommen. Fährt ein Zug planmässig einen
@@ -194,5 +198,5 @@ test/                      Tests (npm test)
 
 ## Lizenzen der Daten
 
-- Fahrplan- und Echtzeitdaten: opentransportdata.swiss (Nutzungsbedingungen beachten); Ausland: gtfs.de / DELFI e.V. (CC BY 4.0), SNCF (Open Data), ÖBB (data.oebb.at, CC BY 4.0)
+- Fahrplan- und Echtzeitdaten: opentransportdata.swiss (Nutzungsbedingungen beachten); Ausland: gtfs.de / DELFI e.V. (CC BY 4.0), SNCF (Open Data), ÖBB (data.oebb.at, CC BY 4.0), Trenitalia über den italienischen NAP / deryclem/trenitalia-gtfs (CC BY 4.0); Landesgrenze © OpenStreetMap-Mitwirkende (ODbL)
 - Kartendaten: © swisstopo, © OpenStreetMap-Mitwirkende (ODbL), OpenRailwayMap (CC-BY-SA)

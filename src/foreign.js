@@ -6,6 +6,7 @@
 // Zugnummern: Eine ausländische Fahrt gilt als Fortsetzung, wenn sie am End-
 // bzw. Anfangshalt der Schweizer Fahrt UND am Halt davor bzw. danach zur
 // gleichen Zeit hält (±3 Minuten). Dann werden ihre weiteren Halte angehängt.
+import fs from 'node:fs';
 import path from 'node:path';
 import { ensureDownloaded, openGtfs } from './gtfs-source.js';
 import { loadGtfs } from './gtfs-loader.js';
@@ -17,6 +18,25 @@ const SAME_PLACE = 600;  // m: gleicher Bahnhof (Koordinaten aus verschiedenen Q
 const CELL = 0.01;       // Grad, Raster für die Bahnhofssuche
 // Ausländische Fahrten laden, die irgendwo in diesem Gebiet halten (S, W, N, O)
 const AREA = [44.5, 4.0, 49.5, 12.5];
+
+// Landesgrenze der Schweiz (OSM, auf ~100 m vereinfacht) als [lat, lon]
+const BORDER = JSON.parse(fs.readFileSync(new URL('./switzerland.json', import.meta.url), 'utf8'));
+
+/** Liegt der Punkt in der Schweiz? (Strahlmethode) */
+export function inSwissBorder(lat, lon) {
+  let inside = false;
+  for (let i = 0, j = BORDER.length - 1; i < BORDER.length; j = i++) {
+    const [ya, xa] = BORDER[i], [yb, xb] = BORDER[j];
+    if ((ya > lat) !== (yb > lat) && lon < xa + ((lat - ya) / (yb - ya)) * (xb - xa)) inside = !inside;
+  }
+  return inside;
+}
+
+// Trenitalia schreibt Bahnhöfe in Grossbuchstaben (MILANO CENTRALE)
+export function niceName(name) {
+  if (name !== name.toUpperCase()) return name;
+  return name.toLowerCase().replace(/(^|[^\p{L}])(\p{L})/gu, (m, a, b) => a + b.toUpperCase());
+}
 
 const dist = (lat1, lon1, lat2, lon2) =>
   Math.hypot((lon2 - lon1) * 111320 * Math.cos((lat1 * Math.PI) / 180), (lat2 - lat1) * 110540);
@@ -90,9 +110,18 @@ export function extendWithForeign(data, foreignFeeds, timeZone) {
     if (k === undefined) {
       k = S.id.length;
       data.stopIndex.set(id, k);
-      S.id.push(id); S.name.push(f.stops.name[s]); S.lat.push(f.stops.lat[s]); S.lon.push(f.stops.lon[s]); S.parent.push(id);
+      S.id.push(id); S.name.push(niceName(f.stops.name[s])); S.lat.push(f.stops.lat[s]); S.lon.push(f.stops.lon[s]); S.parent.push(id);
     }
     return k;
+  };
+
+  // Liegt ein ausländischer Halt in der Schweiz, endet die Verlängerung davor:
+  // Diesen Abschnitt enthält der Schweizer Fahrplan schon als eigene Fahrt.
+  const swissMemo = new Map();
+  const inSwitzerland = (f, s) => {
+    const id = `${f.stops.id[s]}`;
+    if (!swissMemo.has(id)) swissMemo.set(id, inSwissBorder(f.stops.lat[s], f.stops.lon[s]));
+    return swissMemo.get(id);
   };
 
   let extended = 0;
@@ -121,17 +150,31 @@ export function extendWithForeign(data, foreignFeeds, timeZone) {
     }
     if (!after && !before) continue;
 
+    // nur bis zum ersten Halt, der wieder in der Schweiz liegt
+    let first = 0, last = 0;
+    if (before) {
+      first = before.k;
+      while (first > 0 && !inSwitzerland(before.feed, before.trip.stop[first - 1])) first--;
+    }
+    if (after) {
+      last = after.k;
+      while (last + 1 < after.trip.stop.length && !inSwitzerland(after.feed, after.trip.stop[last + 1])) last++;
+    }
+    if (before && first === before.k) before = null;
+    if (after && last === after.k) after = null;
+    if (!after && !before) continue;
+
     const rows = [];
     if (before) {
       const f = before.feed, ft = before.trip;
-      for (let k = 0; k < before.k; k++) {
+      for (let k = first; k < before.k; k++) {
         rows.push([trip.seq[0] - (before.k - k), addStop(f, ft.stop[k]), before.base + ft.arr[k] - base, before.base + ft.dep[k] - base]);
       }
     }
     for (let k = 0; k < n; k++) rows.push([trip.seq[k], trip.stop[k], trip.arr[k], trip.dep[k]]);
     if (after) {
       const f = after.feed, ft = after.trip;
-      for (let k = after.k + 1; k < ft.stop.length; k++) {
+      for (let k = after.k + 1; k <= last; k++) {
         rows.push([trip.seq[n - 1] + (k - after.k), addStop(f, ft.stop[k]), after.base + ft.arr[k] - base, after.base + ft.dep[k] - base]);
       }
     }
@@ -139,7 +182,7 @@ export function extendWithForeign(data, foreignFeeds, timeZone) {
     trip.stop = Int32Array.from(rows, (r) => r[1]);
     trip.arr = Int32Array.from(rows, (r) => Math.round(r[2]));
     trip.dep = Int32Array.from(rows, (r) => Math.round(r[3]));
-    trip.foreign = { before: before ? before.k : 0, after: after ? after.trip.stop.length - after.k - 1 : 0 };
+    trip.foreign = { before: before ? before.k - first : 0, after: after ? last - after.k : 0 };
     if (after) trip.headsign = S.name[trip.stop[trip.stop.length - 1]];
     extended++;
   }

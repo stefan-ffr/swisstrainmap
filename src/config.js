@@ -25,6 +25,8 @@ export const config = {
     'de=https://download.gtfs.de/germany/fv_free/latest.zip',
     'fr=https://eu.ftp.opendatasoft.com/sncf/plandata/Export_OpenData_SNCF_GTFS_NewTripId.zip',
     'at=https://static.web.oebb.at/open-data/soll-fahrplan-gtfs/GTFS_Fahrplan_{year}.zip',
+    // Trenitalia: wöchentlich aus dem offiziellen NeTEx (italienischer NAP) umgewandelt
+    'it=https://raw.githubusercontent.com/deryclem/trenitalia-gtfs/main/gtfs-trenitalia.zip',
   ].join(',')).map((entry) => {
     const i = entry.indexOf('=');
     return { name: entry.slice(0, i), url: entry.slice(i + 1) };
