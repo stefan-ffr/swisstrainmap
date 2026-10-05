@@ -4,6 +4,7 @@
 // dieser Geometrie bzw. geradlinig, solange sie fehlt.
 import { serviceDayStart } from './time.js';
 import { NETWORK_OF } from './modes.js';
+import { AlertStore, stationKey } from './alerts.js';
 
 // So viele kommende Wegpunkte bekommt der Browser, um selbst flüssig zu animieren.
 const LOOKAHEAD = 3;
@@ -25,7 +26,7 @@ export class Timetable {
       const { lat, lon } = data.stops;
       for (const trip of data.trips.values()) {
         const network = legStore.networks.has(NETWORK_OF[trip.route.mode ?? 'rail']) ? NETWORK_OF[trip.route.mode ?? 'rail'] : null;
-        if (!network) continue; // Schiff, Seilbahn (oder abgeschaltetes Netz): Luftlinie
+        if (!network) continue; // Seilbahn (oder abgeschaltetes Netz): Luftlinie
         trip.leg = new Int32Array(trip.stop.length - 1);
         for (let k = 0; k < trip.leg.length; k++) {
           const a = trip.stop[k], b = trip.stop[k + 1];
@@ -44,6 +45,13 @@ export class Timetable {
       }
       return { day, start: serviceDayStart(day, timeZone), active, byMode };
     });
+
+    // Bahnhof (UIC-Nummer o. ä.) -> ein Halt, für Störungsmeldungen zu Halten
+    data.stationIndex = new Map();
+    for (let k = 0; k < data.stops.id.length; k++) {
+      const key = stationKey(data.stops.id[k]);
+      if (!data.stationIndex.has(key)) data.stationIndex.set(key, k);
+    }
 
     // Halte, die von Zügen bedient werden – um bei Zusatzfahrten ohne bekannte
     // Linie zu entscheiden, ob es ein Zug oder ein (Ersatz-)Bus ist.
@@ -243,7 +251,7 @@ export class Timetable {
    * filter: { modes: Set, bbox: [s, w, n, e] } – berechnet werden nur Fahrten
    * dieser Verkehrsmittel, die den Ausschnitt berühren.
    */
-  positions(nowMs, realtime, filter = {}) {
+  positions(nowMs, realtime, filter = {}, alerts = null) {
     this.refreshAdded(realtime);
     const { stops } = this.data;
     const { bbox } = filter;
@@ -282,6 +290,7 @@ export class Timetable {
         op: route.agency,
         delay: Math.round(dwelling ? depDelay[k] : arrDelay[next]),
         rt: realtime?.has(trip.id, day) || false,
+        alert: alerts ? alerts.forTrip(trip.id, route.id, nowMs).length > 0 : false,
         at: dwelling ? stops.name[trip.stop[k]] : null,
         next: stops.name[trip.stop[next]],
         points,
@@ -291,7 +300,7 @@ export class Timetable {
   }
 
   /** Detailinfos zu einer Fahrt (Halteliste und Linienverlauf). */
-  trip(key, realtime) {
+  trip(key, realtime, alerts = null, nowMs = Date.now()) {
     this.refreshAdded(realtime);
     const sep = key.lastIndexOf('|');
     const trip = this.data.trips.get(key.slice(0, sep)) ?? this.added.get(key.slice(0, sep));
@@ -300,9 +309,14 @@ export class Timetable {
     const { stops } = this.data;
     const { A, D, canceled } = this.expectedTimes(trip, day.day, day.start, realtime);
     const list = [];
+    // Meldungen: zur ganzen Fahrt bzw. Linie und zu einzelnen Halten (Index in notes)
+    const notes = alerts ? alerts.forTrip(trip.id, trip.route.id, nowMs) : [];
     for (let k = 0; k < A.length; k++) {
       const s = trip.stop[k];
+      const atStop = alerts ? alerts.forStop(stops.id[s], nowMs) : [];
+      for (const a of atStop) if (!notes.includes(a)) notes.push(a);
       list.push({
+        alerts: atStop.length ? atStop.map((a) => notes.indexOf(a)) : undefined,
         name: stops.name[s],
         lat: stops.lat[s],
         lon: stops.lon[s],
@@ -323,6 +337,9 @@ export class Timetable {
       op: trip.route.agency,
       rt: realtime?.has(trip.id, day.day) || false,
       canceled,
+      // alertsWhole: so viele Meldungen (die ersten in alerts) betreffen die ganze Fahrt
+      alerts: notes.map((a) => AlertStore.describe(a, this.data)),
+      alertsWhole: alerts ? alerts.forTrip(trip.id, trip.route.id, nowMs).length : 0,
       stops: list,
       legs: trip.leg ? Array.from(trip.leg) : [],
     };

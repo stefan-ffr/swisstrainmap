@@ -62,3 +62,22 @@ test('Busnetz: rechtwinklig abbiegen erlaubt, Einbahnstrassen beachtet', async (
   assert.deepEqual(net.route(P(30, 0), P(20, 0)), [pts[5], pts[6], pts[4]]);
   assert.deepEqual(net.route(P(20, 0), P(30, 0)), [pts[4], pts[5]]);
 });
+
+test('Schiffsnetz: Kurse am Steg verbunden, kein grosser Umweg', async () => {
+  const { PROFILES } = await import('../src/rail-network.js');
+  // Kurs 1-2-3 endet am Steg 3, Kurs 4-5-6 beginnt 140 m daneben bei 4.
+  // 7-8-9 ist ein Kurs mit riesigem Bogen zwischen zwei nahen Stegen.
+  const pts = {
+    1: P(0, 0), 2: P(20, 15), 3: P(40, 0), 4: P(41, 1), 5: P(60, 15), 6: P(80, 0),
+    7: P(0, -60), 8: P(5, -160), 9: P(10, -60),
+  };
+  const elements = Object.entries(pts).map(([id, [lat, lon]]) => ({ type: 'node', id: Number(id), lat, lon }));
+  elements.push(
+    { type: 'way', id: 1, nodes: [1, 2, 3], tags: { route: 'ferry' } },
+    { type: 'way', id: 2, nodes: [4, 5, 6], tags: { route: 'ferry' } },
+    { type: 'way', id: 3, nodes: [7, 8, 9], tags: { route: 'ferry' } },
+  );
+  const net = new RailNetwork({ elements }, PROFILES.water);
+  assert.deepEqual(net.route(P(0, 0), P(80, 0)), [pts[1], pts[2], pts[3], pts[4], pts[5], pts[6]]);
+  assert.equal(net.route(P(0, -60), P(10, -60)), null, 'Luftlinie statt 20 km Umweg für 1 km');
+});

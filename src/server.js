@@ -10,7 +10,10 @@ import { loadGtfs } from './gtfs-loader.js';
 import { ensureExtractInWorker } from './extract-worker.js';
 import { Timetable } from './timetable.js';
 import { RealtimeStore } from './realtime.js';
-import { todayKey } from './time.js';
+import { AlertStore } from './alerts.js';
+import { FormationService, evuOf } from './formation.js';
+import { timetableYear, todayKey } from './time.js';
+import { loadForeignFeeds, extendWithForeign } from './foreign.js';
 import { LegStore } from './legs.js';
 import { ExtraLog } from './extras.js';
 import { ensureRailOsm, loadRailNetwork, PROFILES } from './rail-network.js';
@@ -20,6 +23,8 @@ const log = (msg) => console.log(`[${new Date().toISOString()}] ${msg}`);
 
 const state = { timetable: null, loading: false, loadedAt: null, loadError: null };
 const realtime = new RealtimeStore();
+const alerts = new AlertStore(config.alertsLang);
+const formation = new FormationService({ url: config.formationUrl, apiKey: config.formationApiKey, enabled: config.formationEnabled, log });
 const extraLog = new ExtraLog(path.resolve(root, config.extrasFile), log);
 const extraLogLoaded = extraLog.load();
 
@@ -32,11 +37,12 @@ async function recordExtras() {
   extraLog.prune(todayKey(Date.now(), config.timeZone));
   extraLog.record(tt.added.values(), (trip) => tt.expectedTimes(trip, trip.day, trip.dayStart, realtime), tt.data.stops);
 }
-const networks = [config.railRouting && 'rail', config.roadRouting && 'road'].filter(Boolean);
+const networks = [config.railRouting && 'rail', config.roadRouting && 'road', config.shipRouting && 'water'].filter(Boolean);
 const legStore = networks.length ? new LegStore(path.resolve(root, config.railLegsCacheFile), log, networks) : null;
 const NETWORK_SOURCES = {
   rail: { path: config.railOsmPath, cache: config.railOsmCacheFile },
   road: { path: config.roadOsmPath, cache: config.roadOsmCacheFile },
+  water: { path: config.shipOsmPath, cache: config.shipOsmCacheFile },
 };
 const legCacheLoaded = legStore?.loadCache();
 
@@ -57,7 +63,7 @@ async function reload() {
   state.loading = true;
   try {
     const file = config.gtfsPath
-      || await ensureDownloaded(config.gtfsUrl, path.resolve(root, config.gtfsCacheFile), config.gtfsMaxAgeHours, log);
+      || await ensureDownloaded(config.gtfsUrl.replace('{year}', timetableYear(todayKey(Date.now(), config.timeZone))), path.resolve(root, config.gtfsCacheFile), config.gtfsMaxAgeHours, log);
     let source = path.resolve(root, file);
     try {
       source = await ensureExtractInWorker(source, path.resolve(root, config.gtfsExtractDir), config.routeTypes, log);
@@ -72,6 +78,15 @@ async function reload() {
         centerDay: todayKey(Date.now(), config.timeZone),
         log,
       });
+      if (config.foreignGtfs.length) {
+        const foreign = await loadForeignFeeds(config.foreignGtfs, {
+          dataDir: path.resolve(root, 'data'),
+          centerDay: data.days[1],
+          checkHours: config.foreignMaxAgeHours,
+          log,
+        });
+        log(`Ausland: ${extendWithForeign(data, foreign, config.timeZone)} Fahrten über die Grenze hinaus verlängert`);
+      }
       await legCacheLoaded;
       state.timetable = new Timetable(data, config.timeZone, legStore);
       recordExtras().catch((err) => log(`Extrafahrten: ${err.message}`));
@@ -167,14 +182,14 @@ const server = http.createServer((req, res) => {
     let trains;
     if (key !== null && cache.get(key)?.at > now - 2000) trains = cache.get(key).trains;
     else {
-      trains = tt.positions(now, realtime, filter);
+      trains = tt.positions(now, realtime, filter, alerts);
       if (key !== null) cache.set(key, { at: now, trains });
     }
     return sendJson(req, res, 200, { now, trains, serverTime: now, legsVersion: legStore?.version ?? null });
   }
   if (url.pathname.startsWith('/api/trip/')) {
     if (!tt) return sendJson(req, res, 503, { error: 'Fahrplan wird geladen …' });
-    const trip = tt.trip(decodeURIComponent(url.pathname.slice('/api/trip/'.length)), realtime);
+    const trip = tt.trip(decodeURIComponent(url.pathname.slice('/api/trip/'.length)), realtime, alerts);
     if (trip) trip.legs = trip.legs.map((id) => legStore?.geometry(id) || '');
     return trip ? sendJson(req, res, 200, trip) : sendJson(req, res, 404, { error: 'Fahrt unbekannt' });
   }
@@ -192,6 +207,31 @@ const server = http.createServer((req, res) => {
     const day = Number(url.searchParams.get('day')) || todayKey(Date.now(), config.timeZone);
     return sendJson(req, res, 200, { day, extras: extraLog.forDay(day) });
   }
+  if (url.pathname.startsWith('/api/formation/')) {
+    // Zugkomposition einer Fahrt (nur Züge von Betreibern, die der Dienst kennt)
+    if (!tt) return sendJson(req, res, 503, { error: 'Fahrplan wird geladen …' });
+    if (!formation.enabled) return sendJson(req, res, 404, { error: 'Zugkomposition nicht eingerichtet (FORMATION_API_KEY)' });
+    const key = decodeURIComponent(url.pathname.slice('/api/formation/'.length));
+    const trip = tt.trip(key, realtime);
+    const evu = trip && evuOf(trip.op);
+    if (!trip || trip.mode !== 'rail' || !evu || !/^\d+$/.test(trip.num || '')) {
+      return sendJson(req, res, 404, { error: 'Für diesen Zug gibt es keine Kompositionsdaten' });
+    }
+    const day = String(key.slice(key.lastIndexOf('|') + 1));
+    const date = `${day.slice(0, 4)}-${day.slice(4, 6)}-${day.slice(6, 8)}`;
+    formation.get(evu, date, trip.num)
+      .then((data) => sendJson(req, res, 200, { evu, date, trainNumber: trip.num, ...data }))
+      .catch((err) => sendJson(req, res, err.status === 404 ? 404 : err.status === 429 ? 429 : 502, { error: err.message }));
+    return;
+  }
+  if (url.pathname === '/api/alerts') {
+    // aktive Störungsmeldungen, wichtigste zuerst
+    const order = ['NO_SERVICE', 'SIGNIFICANT_DELAYS', 'DETOUR', 'REDUCED_SERVICE', 'STOP_MOVED', 'MODIFIED_SERVICE', 'ADDITIONAL_SERVICE'];
+    const rank = (a) => (order.includes(a.effect) ? order.indexOf(a.effect) : order.length);
+    const list = alerts.active(Date.now()).map((a) => AlertStore.describe(a, tt?.data))
+      .sort((a, b) => rank(a) - rank(b) || (b.start ?? 0) - (a.start ?? 0));
+    return sendJson(req, res, 200, { alerts: list, status: alerts.status });
+  }
   if (url.pathname === '/api/status') {
     return sendJson(req, res, 200, {
       timetable: {
@@ -199,6 +239,8 @@ const server = http.createServer((req, res) => {
         days: tt?.days.map((d) => d.day), trips: tt?.data.trips.size,
       },
       realtime: realtime.status,
+      alerts: alerts.status,
+      formation: formation.status,
       legs: legStore ? { ...legStore.status, enabled: true } : { enabled: false },
     });
   }
@@ -215,4 +257,12 @@ realtime.start({
   log,
   onUpdate: () => recordExtras().catch((err) => log(`Extrafahrten: ${err.message}`)),
 });
+alerts.start({
+  url: config.alertsUrl,
+  apiKey: config.alertsApiKey,
+  enabled: config.alertsEnabled,
+  intervalSeconds: config.alertsIntervalSeconds,
+  cacheFile: path.resolve(root, config.alertsCacheFile),
+  log,
+}).then((on) => { if (!on) log('GTFS-SA: kein API-Key – keine Störungsmeldungen.'); });
 reload();

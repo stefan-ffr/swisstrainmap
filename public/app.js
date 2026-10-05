@@ -82,7 +82,86 @@ function delayClass(sec) {
 }
 const delayStroke = (t) => (!t.rt ? '#ffffff' : { 'delay-ok': '#2e9b45', 'delay-warn': '#e69500', 'delay-bad': '#d62b2b' }[delayClass(t.delay)]);
 const delayText = (sec) => (Math.abs(sec) < 60 ? 'pünktlich' : `${sec > 0 ? '+' : ''}${Math.round(sec / 60)}'`);
-const label = (t) => `${t.name}${t.num ? ` ${t.num}` : ''}`;
+const label = (t) => `${t.alert ? '⚠ ' : ''}${t.name}${t.num ? ` ${t.num}` : ''}`;
+
+// Störungsmeldungen (GTFS-SA)
+const EFFECTS = {
+  NO_SERVICE: 'Kein Betrieb', REDUCED_SERVICE: 'Eingeschränkter Betrieb', SIGNIFICANT_DELAYS: 'Grosse Verspätungen',
+  DETOUR: 'Umleitung', ADDITIONAL_SERVICE: 'Zusätzliche Fahrten', MODIFIED_SERVICE: 'Geänderter Betrieb',
+  STOP_MOVED: 'Halt verschoben', ACCESSIBILITY_ISSUE: 'Barrierefreiheit eingeschränkt',
+};
+const fmtDate = (ms) => new Date(ms).toLocaleString('de-CH', { day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Zurich' });
+function alertHtml(a, open = openAlerts.has(a.id)) {
+  const period = a.start || a.end ? `<span class="period">${a.start ? fmtDate(a.start) : ''} – ${a.end ? fmtDate(a.end) : 'offen'}</span>` : '';
+  const effect = EFFECTS[a.effect] ? `<span class="effect">${EFFECTS[a.effect]}</span>` : '';
+  const more = [
+    a.description && `<p>${esc(a.description).replace(/\n/g, '<br>')}</p>`,
+    a.routes?.length && `<p class="sub">Linien: ${a.routes.map(esc).join(', ')}</p>`,
+    a.stops?.length && `<p class="sub">Halte: ${a.stops.map((x) => `<a href="#" class="fly" data-lat="${x.lat}" data-lon="${x.lon}">${esc(x.name)}</a>`).join(', ')}</p>`,
+    a.url && `<p><a href="${esc(a.url)}" target="_blank" rel="noopener">Mehr Infos</a></p>`,
+  ].filter(Boolean).join('');
+  return `<details class="alert" data-id="${esc(a.id)}" ${open ? 'open' : ''}><summary>⚠ ${esc(a.header || EFFECTS[a.effect] || 'Störung')} ${effect}${period}</summary>${more}</details>`;
+}
+// --- Zugkomposition (Train Formation Service) --------------------------------
+
+let formationEnabled = false;
+const formations = new Map(); // Fahrt-ID -> Antwort von /api/formation bzw. { error }
+let formationOpen = null; // Fahrt-ID, deren Komposition angezeigt wird
+let formationStop = null; // gewählter Halt (Name)
+const WAGON_LABEL = { 1: '1', 2: '2', 12: '1|2', LK: 'Lok', D: 'Gepäck', WR: '🍴', W1: '🍴 1', W2: '🍴 2', CC: 'Liege', WL: 'Schlaf', FA: 'Fam', FZ: 'Fam', K: '–', X: 'abg.' };
+const OFFERS = {
+  BHP: ['♿', 'Rollstuhlplätze'], NF: ['⤓', 'Niederflur-Einstieg'], VH: ['🚲', 'Velohaken'], VR: ['🚲ʳ', 'Velo: Reservation nötig'],
+  KW: ['👶', 'Kinderwagen-Plattform'], FZ: ['👪', 'Familienzone'], BZ: ['💼', 'Businesszone'], LA: ['🧳', 'Gepäck'],
+  WL: ['🛏', 'Schlafwagen'], CC: ['🛏', 'Liegewagen'],
+};
+
+function formationHtml(f, liveStop) {
+  if (f.error) return `<p class="sub">${esc(f.error)}</p>`;
+  if (!f.stops?.length) return '<p class="sub">Keine Kompositionsdaten.</p>';
+  const stop = f.stops.find((x) => x.name === formationStop) ?? f.stops.find((x) => x.name === liveStop) ?? f.stops[0];
+  const options = f.stops.map((x) => `<option ${x === stop ? 'selected' : ''}>${esc(x.name)}</option>`).join('');
+  let lastSector = null, lastUnit = null;
+  const cells = stop.wagons.map((w) => {
+    const head = w.sector && w.sector !== lastSector ? `<b class="sector">${esc(w.sector)}</b>` : '';
+    const gap = lastUnit !== null && w.unit !== lastUnit ? ' gap' : '';
+    lastSector = w.sector; lastUnit = w.unit;
+    const offers = w.offers.map((o) => OFFERS[o] ? `<span title="${OFFERS[o][1]}">${OFFERS[o][0]}</span>` : '').join('');
+    const title = [w.number ? `Wagen ${w.number}` : '', ...w.offers.map((o) => OFFERS[o]?.[1] ?? o), ...w.status].filter(Boolean).join(' · ');
+    return `<div class="wagon${gap}${w.status.length ? ' closed' : ''}${/^(1|W1)$/.test(w.type) ? ' first' : ''}" title="${esc(title)}">${head}<span class="cls">${esc(WAGON_LABEL[w.type] ?? w.type)}</span><small>${w.number ?? '&nbsp;'}</small><span class="offers">${offers}</span></div>`;
+  }).join('');
+  const goals = stop.goals.filter((g) => g.destination).map((g) => `Wagen ${g.from}–${g.to} → ${esc(g.destination)}`).join(' · ');
+  return `
+    <div class="sub">Am Halt <select id="formation-stop">${options}</select>${stop.track ? ` · Gleis ${esc(stop.track)}` : ''}</div>
+    <div class="train">${cells}</div>
+    <div class="sub">${f.types.length ? `Fahrzeuge: ${f.types.map(esc).join(', ')}` : ''}${goals ? `<br>${goals}` : ''}<br>Reihenfolge wie am Perron (Sektor A links)</div>`;
+}
+
+async function loadFormation(id) {
+  try {
+    const res = await fetch(`api/formation/${encodeURIComponent(id)}`);
+    const body = await res.json();
+    formations.set(id, res.ok ? body : { error: body.error || res.statusText });
+  } catch (err) {
+    formations.set(id, { error: err.message });
+  }
+  if (selectedId === id) showDetails(id);
+}
+
+// aufgeklappte Meldungen bleiben offen, auch wenn die Ansicht neu gezeichnet wird
+const openAlerts = new Set();
+document.addEventListener('toggle', (ev) => {
+  const id = ev.target.dataset?.id;
+  if (!ev.target.matches?.('details.alert') || !id) return;
+  if (ev.target.open) openAlerts.add(id); else openAlerts.delete(id);
+}, true);
+// Links «Halt» in Meldungen: zur Haltestelle springen
+document.addEventListener('click', (ev) => {
+  const a = ev.target.closest('a.fly');
+  if (!a) return;
+  ev.preventDefault();
+  setFollow(false);
+  map.flyTo([Number(a.dataset.lat), Number(a.dataset.lon)], 16, { duration: 0.8 });
+});
 
 // --- Streckengeometrie ------------------------------------------------------
 
@@ -233,6 +312,11 @@ async function pollStatus() {
       ? `Echtzeit: ${rt.trips} Fahrten mit Prognose${rt.lastSuccess ? `, Stand ${fmtTime(Date.parse(rt.lastSuccess))}` : ''}`
       : 'Echtzeit aus – Positionen nach Fahrplan (GTFS_RT_API_KEY setzen)';
     if (rt.lastError) text += ` · Fehler: ${rt.lastError}`;
+    formationEnabled = !!s.formation?.enabled;
+    if (s.alerts?.enabled && s.alerts.lastSuccess) {
+      $('alerts-btn').hidden = false;
+      $('alerts-btn').textContent = `Störungen (${s.alerts.alerts})`;
+    }
     const lg = s.legs;
     if (lg?.error) text += ` · Gleisnetz: ${lg.error}`;
     else if (lg?.running) text += ` · Strecken werden berechnet: ${lg.done}/${lg.total}`;
@@ -384,7 +468,8 @@ async function showDetails(id) {
       const extra = trip.rt && Math.abs(d) >= 60 ? ` <span class="${delayClass(d)}">${delayText(d)}</span>` : '';
       return fmtTime(plan) + extra;
     };
-    return `<tr class="stop ${passed ? 'past' : ''} ${cur ? 'cur' : ''}" data-lat="${s.lat}" data-lon="${s.lon}" title="Zu ${esc(s.name)} springen"><td>${esc(s.name)}</td><td class="t">${cell(s.arr, s.arrRt)}</td><td class="t">${cell(s.dep, s.depRt)}</td></tr>`;
+    const warn = s.alerts ? ` <span class="warn" title="${esc(s.alerts.map((i) => trip.alerts[i].header).join(' · '))}">⚠</span>` : '';
+    return `<tr class="stop ${passed ? 'past' : ''} ${cur ? 'cur' : ''}" data-lat="${s.lat}" data-lon="${s.lon}" title="Zu ${esc(s.name)} springen"><td>${esc(s.name)}${warn}</td><td class="t">${cell(s.arr, s.arrRt)}</td><td class="t">${cell(s.dep, s.depRt)}</td></tr>`;
   }).join('');
 
   const delay = live && trip.rt ? ` · <span class="${delayClass(live.delay)}">${delayText(live.delay)}</span>` : '';
@@ -396,8 +481,12 @@ async function showDetails(id) {
     <div class="actions">
       <button id="follow-btn" class="link-btn" type="button" aria-pressed="${follow}">${follow ? 'Verfolgen: an' : 'Verfolgen'}</button>
       <button id="route-btn" class="link-btn" type="button">Ganze Strecke</button>
+      ${formationEnabled && trip.mode === 'rail' ? `<button id="formation-btn" class="link-btn" type="button" aria-pressed="${formationOpen === id}">Komposition</button>` : ''}
     </div>
-    <table><tr><td></td><td class="t">an</td><td class="t">ab</td></tr>${rows}</table>`;
+    ${formationOpen === id ? `<div id="formation">${formations.has(id) ? formationHtml(formations.get(id), live?.at || live?.next) : '<p class="sub">Lade Komposition …</p>'}</div>` : ''}
+    ${(trip.alerts || []).slice(0, trip.alertsWhole).map((a) => alertHtml(a)).join('')}
+    <table><tr><td></td><td class="t">an</td><td class="t">ab</td></tr>${rows}</table>
+    ${trip.alerts?.length > trip.alertsWhole ? `<h3>Hinweise zu Halten</h3>${trip.alerts.slice(trip.alertsWhole).map((a) => alertHtml(a)).join('')}` : ''}`;
   $('details').hidden = false;
   $('details').querySelector('.close').onclick = closeDetails;
   $('follow-btn').onclick = () => {
@@ -405,6 +494,15 @@ async function showDetails(id) {
     const marker = trains.get(id)?.marker;
     if (follow && marker) map.setView(marker.getLatLng(), Math.max(map.getZoom(), FOLLOW_ZOOM));
   };
+  if ($('formation-btn')) {
+    $('formation-btn').onclick = () => {
+      formationOpen = formationOpen === id ? null : id;
+      formationStop = null;
+      if (formationOpen && !formations.has(id)) loadFormation(id);
+      showDetails(id);
+    };
+  }
+  if ($('formation-stop')) $('formation-stop').onchange = (ev) => { formationStop = ev.target.value; showDetails(id); };
   $('route-btn').onclick = () => {
     setFollow(false);
     map.fitBounds(line.getBounds(), { paddingTopLeft: [window.innerWidth > 600 ? 360 : 20, 40], paddingBottomRight: [40, 40] });
@@ -470,6 +568,25 @@ async function showExtras() {
 }
 
 $('extras-btn').addEventListener('click', showExtras);
+
+async function showAlerts() {
+  selectedId = null;
+  setFollow(false);
+  routeLayer.clearLayers();
+  const { alerts } = await (await fetch('api/alerts')).json();
+  const box = $('details');
+  const filter = query;
+  const shown = filter ? alerts.filter((a) => [a.header, a.description, ...a.routes, ...a.stops.map((x) => x.name)].some((x) => x && x.toLowerCase().includes(filter))) : alerts;
+  box.innerHTML = `
+    <button class="close" title="Schliessen">✕</button>
+    <h2>Störungen und Hinweise</h2>
+    <div class="sub">${shown.length} aktuelle Meldungen${filter ? ` zu «${esc(filter)}»` : ''} (Suchfeld filtert)</div>
+    ${shown.map((a) => alertHtml(a)).join('') || '<p class="sub">Keine.</p>'}`;
+  box.hidden = false;
+  box.querySelector('.close').onclick = closeDetails;
+}
+
+$('alerts-btn').addEventListener('click', showAlerts);
 
 // --- Start ------------------------------------------------------------------
 

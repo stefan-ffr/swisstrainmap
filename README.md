@@ -23,6 +23,12 @@ bekannten Zugradar-Karten – **berechnet**:
    Fahrt nur enthält, solange sie läuft, protokolliert der Server jede Extrafahrt (`data/extras.json`, zwei
    Tage); die Liste „Extrafahrten heute“ zeigt auch bereits beendete. Güterzüge sind in keinen offenen Daten
    enthalten.
+   Störungsmeldungen kommen aus GTFS-SA (alle 2 Minuten): Fahrzeuge betroffener Fahrten bzw. Linien tragen ein
+   ⚠, die Detailansicht zeigt die Meldung und markiert betroffene Halte, „Störungen“ listet alle aktuellen.
+   „Komposition“ in der Detailansicht eines Zugs zeigt die Wagenreihung (Train Formation Service: Sektoren,
+   Klassen, Wagennummern, Rollstuhl-/Velo-/Familienplätze, Fahrzeugtyp). Abgefragt wird nur auf Klick, mit
+   10 Minuten Zwischenspeicher und Sperre vor dem Limit (50/min, 20 000/Tag). Betreiber: SBB, BLS, SOB, Thurbo,
+   RhB, TPF, transN, MBC, zb, ÖBB.
 3. Das Gleisnetz der Schweiz wird aus OpenStreetMap geladen (`railway=rail|narrow_gauge|light_rail|funicular`,
    ohne Rangiergleise). Für jedes Paar aufeinanderfolgender Halte sucht der Server per A* den Weg über die
    Gleise – über gerichtete Gleisabschnitte, sodass Züge an Weichen nicht „umkehren“ (max. 70° Richtungsänderung
@@ -36,8 +42,10 @@ bekannten Zugradar-Karten – **berechnet**:
    Bergbahnen ab 11, Trams ab 12, Busse ab 13) und nur für den sichtbaren Ausschnitt (`/api/trains?modes=…&bbox=…`).
    Trams, Metro und Standseilbahnen fahren wie Züge auf den OSM-Gleisen. Busse fahren auf den Strassen, die in
    OSM als Buslinien (`route=bus`/`trolleybus`) eingetragen sind – Einbahnstrassen werden beachtet (ausser mit
-   Busausnahme), rechtwinkliges Abbiegen ist erlaubt, Wenden nicht. Schiffe und Luftseilbahnen fahren in
-   Luftlinie zwischen den Halten.
+   Busausnahme), rechtwinkliges Abbiegen ist erlaubt, Wenden nicht. Schiffe folgen den in OSM gezeichneten
+   Schiffskursen (`route=ferry`, ~700 Wege, ~1 MB; Kurse, die am selben Steg enden, werden verbunden) –
+   so fahren sie z. B. durch den Aarekanal nach Interlaken statt übers Land. Fehlt ein Kurs und wäre der
+   Weg über andere Stege mehr als dreimal so lang, gilt die Luftlinie. Luftseilbahnen fahren in Luftlinie.
 6. Der Browser holt die Geometrie der Abschnitte einmalig (`/api/legs`), interpoliert die Position entlang der
    Gleise und animiert die Züge flüssig; neue Positionsdaten alle 10 s.
 
@@ -81,7 +89,7 @@ Das Skript [`deploy/install.sh`](deploy/install.sh)
 4. startet App und Caddy mit `docker compose up -d --build`.
 
 Erneut ausführen aktualisiert die Installation; mit Enter bleibt der bisherige Key erhalten. Ohne Rückfragen:
-`DOMAIN=… GTFS_RT_API_KEY=… bash install.sh`. Weitere Variablen: `INSTALL_DIR`, `BRANCH`.
+`DOMAIN=… GTFS_RT_API_KEY=… GTFS_SA_API_KEY=… FORMATION_API_KEY=… bash install.sh`. Weitere Variablen: `INSTALL_DIR`, `BRANCH`.
 
 **Von Hand:** Voraussetzungen sind Docker mit Compose-Plugin, die Ports 80 und 443 und ein DNS-Eintrag (A/AAAA)
 der Domain auf den Server. Mit allen Verkehrsmitteln braucht der Server im Betrieb rund 1,4 GB RAM und beim einmaligen Erstellen
@@ -90,7 +98,7 @@ Fahrplan, Auszug und Gleisnetz zusammen etwa 1,5 GB in `./data`.
 
 ```bash
 git clone https://github.com/stefan-ffr/swisstrainmap.git && cd swisstrainmap
-cp deploy/env.example .env      # Domain und GTFS_RT_API_KEY eintragen
+cp deploy/env.example .env      # Domain und API-Keys eintragen
 docker compose up -d --build
 docker compose logs -f app      # erster Start: Download + Auszug ≈ 3–4 Minuten
 ```
@@ -118,10 +126,12 @@ Fahrplan und Prognose.
 |---|---|---|
 | `PORT` | `8080` | HTTP-Port |
 | `GTFS_PATH` | – | Lokaler Fahrplan (ZIP oder entpacktes Verzeichnis). Wenn gesetzt, wird nichts heruntergeladen. |
-| `GTFS_URL` | Permalink *timetable-2026-gtfs2020* | Download-URL des GTFS-ZIP. Zum Fahrplanwechsel im Dezember auf den neuen Datensatz anpassen. |
+| `GTFS_URL` | Permalink *timetable-{year}-gtfs2020* | Download-URL des GTFS-ZIP. `{year}` wird durch das aktuelle Fahrplanjahr ersetzt – der Fahrplanwechsel im Dezember geht automatisch. |
 | `GTFS_CACHE_FILE` | `data/gtfs.zip` | Ablage des heruntergeladenen Fahrplans |
 | `GTFS_MAX_AGE_HOURS` | `6` | So oft wird geprüft, ob der Permalink auf eine neue Fahrplan-Version zeigt; nur dann wird neu geladen |
 | `MODES` | `rail,tram,metro,bus,ship,cable,funicular` | Verkehrsmittel, die geladen werden (z. B. nur `rail` für eine reine Zugkarte) |
+| `FOREIGN_GTFS` | `de=…gtfs.de…,fr=…sncf…,at=…oebb…,it=…trenitalia…` | Fahrpläne der Nachbarländer (`Name=URL`, kommagetrennt; leer = aus; `{year}` = Fahrplanjahr) |
+| `FOREIGN_GTFS_MAX_AGE_HOURS` | `24` | So oft wird geprüft, ob es neue ausländische Fahrpläne gibt (geladen wird nur bei Änderung) |
 | `GTFS_EXTRACT_DIR` | `data/gtfs-extract` | Auszug für die gewählten Verkehrsmittel, einmal pro Fahrplan-Version erstellt |
 | `GTFS_RT_URL` | `https://api.opentransportdata.swiss/la/gtfs-rt` | GTFS-RT-Endpunkt |
 | `GTFS_RT_API_KEY` | – | API-Key für GTFS-RT |
@@ -129,6 +139,14 @@ Fahrplan und Prognose.
 | `GTFS_RT_INTERVAL` | `35` | Abfrageintervall GTFS-RT in Sekunden (Minimum 12; beim Plan mit 5 Abfragen/min z. B. `15`) |
 | `EXTRAS_FILE` | `data/extras.json` | Protokoll der Extrafahrten (letzte 2 Tage) |
 | `GTFS_RT_CACHE_FILE` | `data/gtfs-rt.pb` | Letzter GTFS-RT-Feed (für Neustarts) |
+| `GTFS_SA_API_KEY` | – | API-Key für GTFS-SA (Störungsmeldungen; eigenes Produkt im API-Manager, eigener Key). Ohne Key keine Störungsmeldungen |
+| `GTFS_SA_URL` | `…/la/gtfs-sa` | Endpunkt der Störungsmeldungen |
+| `GTFS_SA_INTERVAL` | `120` | Abfrageintervall GTFS-SA in Sekunden |
+| `GTFS_SA_ENABLED` | – | `1` = auch ohne eigenen Key abfragen (Proxy ergänzt die Authentisierung) |
+| `FORMATION_API_KEY` | – | API-Key für den Train Formation Service (Zugkomposition; eigenes Produkt). Ohne Key kein Knopf „Komposition“ |
+| `FORMATION_URL` | `…/formation/v1/formations_full` | Endpunkt der Zugkomposition |
+| `FORMATION_ENABLED` | – | `1` = auch ohne eigenen Key abfragen (Proxy ergänzt die Authentisierung) |
+| `ALERTS_LANG` | `de` | Sprache der Meldungen (`de`, `fr`, `it`, `en`) |
 | `RAIL_ROUTING` | `1` | `0` = Gleisnetz nicht verwenden (Luftlinie) |
 | `RAIL_OSM_PATH` | – | Lokale Overpass-JSON-Datei mit dem Gleisnetz (statt Download) |
 | `OVERPASS_URL` | `https://overpass.osm.ch/api/interpreter,https://overpass-api.de/api/interpreter` | Overpass-Server (kommagetrennt, der Reihe nach versucht) |
@@ -139,6 +157,9 @@ Fahrplan und Prognose.
 | `ROAD_ROUTING` | `1` | `0` = Busse in Luftlinie statt auf den Strassen der OSM-Buslinien |
 | `ROAD_OSM_PATH` | – | Lokale Overpass-JSON-Datei mit dem Busnetz (statt Download) |
 | `ROAD_OSM_CACHE_FILE` | `data/road-osm.json` | Ablage des heruntergeladenen Busnetzes (~190 MB) |
+| `SHIP_ROUTING` | `1` | `0` = Schiffe in Luftlinie statt auf den OSM-Schiffskursen |
+| `SHIP_OSM_PATH` | – | Lokale Overpass-JSON-Datei mit den Schiffskursen (statt Download) |
+| `SHIP_OSM_CACHE_FILE` | `data/water-osm.json` | Ablage der heruntergeladenen Schiffskurse |
 
 ## API
 
@@ -148,6 +169,8 @@ Fahrplan und Prognose.
   `null` = wird noch berechnet)
 - `GET /api/trip/<tripId>|<YYYYMMDD>` – Halteliste mit Soll- und Prognosezeiten und Streckenverlauf
 - `GET /api/extras?day=YYYYMMDD` – Protokoll der Extrafahrten eines Tages (Standard: heute), auch beendete
+- `GET /api/formation/<id>` – Zugkomposition einer Fahrt (Wagenreihung je Halt: Sektor, Klasse, Wagennummer, Angebote, Fahrzeugtyp)
+- `GET /api/alerts` – aktive Störungsmeldungen (GTFS-SA) mit betroffenen Linien und Halten, wichtigste zuerst
 - `GET /api/status` – Zustand von Fahrplan- und Echtzeit-Import
 
 ## Projektstruktur
@@ -168,6 +191,15 @@ test/                      Tests (npm test)
 
 ## Grenzen & Ideen für später
 
+- **Internationale Züge:** Der Schweizer Fahrplan enthält z. B. den ICE 100 nur bis Basel Bad Bf. Der Server lädt
+  deshalb zusätzlich die Fahrpläne aus Deutschland (gtfs.de/DELFI, Fernverkehr), Frankreich (SNCF), Österreich (ÖBB-Sollfahrplan) und Italien (Trenitalia) und hängt
+  den Laufweg im Ausland an, wenn eine ausländische Fahrt am End- bzw. Anfangshalt und am Halt davor bzw. danach
+  zur gleichen Zeit hält (±3 Min.). Die Verlängerung endet vor dem ersten Halt, der wieder in der Schweiz liegt
+  (Landesgrenze aus OSM in `src/switzerland.json`) – diese Abschnitte führt der Schweizer Fahrplan schon selbst.
+  Trenitalia veröffentlicht nur NeTEx; den GTFS-Feed wandelt das Projekt
+  [deryclem/trenitalia-gtfs](https://github.com/deryclem/trenitalia-gtfs) wöchentlich daraus um. Echtzeit gilt nur
+  für den Schweizer Teil.
+  Im Ausland fahren die Züge auf der Luftlinie zwischen den Halten.
 - **Streckenwahl geschätzt:** Der Schweizer GTFS-Feed enthält keine `shapes.txt` und keine Durchfahrtspunkte.
   Zwischen zwei Halten wird daher der kürzeste Weg auf den Gleisen angenommen. Fährt ein Zug planmässig einen
   Umweg (z. B. Bergstrecke statt Basistunnel ohne Halt dazwischen), stimmt die gezeichnete Strecke nicht.
@@ -182,5 +214,5 @@ test/                      Tests (npm test)
 
 ## Lizenzen der Daten
 
-- Fahrplan- und Echtzeitdaten: opentransportdata.swiss (Nutzungsbedingungen beachten)
+- Fahrplan- und Echtzeitdaten: opentransportdata.swiss (Nutzungsbedingungen beachten); Ausland: gtfs.de / DELFI e.V. (CC BY 4.0), SNCF (Open Data), ÖBB (data.oebb.at, CC BY 4.0), Trenitalia über den italienischen NAP / deryclem/trenitalia-gtfs (CC BY 4.0); Landesgrenze © OpenStreetMap-Mitwirkende (ODbL)
 - Kartendaten: © swisstopo, © OpenStreetMap-Mitwirkende (ODbL), OpenRailwayMap (CC-BY-SA)

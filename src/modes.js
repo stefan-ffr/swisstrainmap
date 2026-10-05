@@ -3,8 +3,8 @@
 export const ALL_MODES = ['rail', 'tram', 'metro', 'bus', 'ship', 'cable', 'funicular'];
 
 // Netz, auf dem ein Verkehrsmittel zwischen den Halten geroutet wird
-// (Profile in rail-network.js); Schiffe und Luftseilbahnen: Luftlinie.
-export const NETWORK_OF = { rail: 'rail', tram: 'rail', metro: 'rail', funicular: 'rail', bus: 'road' };
+// (Profile in rail-network.js); Luftseilbahnen: Luftlinie.
+export const NETWORK_OF = { rail: 'rail', tram: 'rail', metro: 'rail', funicular: 'rail', bus: 'road', ship: 'water' };
 export const ROUTED_MODES = new Set(Object.keys(NETWORK_OF));
 
 export function modeOf(type) {
