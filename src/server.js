@@ -11,6 +11,7 @@ import { ensureExtractInWorker } from './extract-worker.js';
 import { Timetable } from './timetable.js';
 import { RealtimeStore } from './realtime.js';
 import { todayKey } from './time.js';
+import { loadForeignFeeds, extendWithForeign } from './foreign.js';
 import { LegStore } from './legs.js';
 import { ExtraLog } from './extras.js';
 import { ensureRailOsm, loadRailNetwork, PROFILES } from './rail-network.js';
@@ -72,6 +73,15 @@ async function reload() {
         centerDay: todayKey(Date.now(), config.timeZone),
         log,
       });
+      if (config.foreignGtfs.length) {
+        const foreign = await loadForeignFeeds(config.foreignGtfs, {
+          dataDir: path.resolve(root, 'data'),
+          centerDay: data.days[1],
+          checkHours: config.foreignMaxAgeHours,
+          log,
+        });
+        log(`Ausland: ${extendWithForeign(data, foreign, config.timeZone)} Fahrten über die Grenze hinaus verlängert`);
+      }
       await legCacheLoaded;
       state.timetable = new Timetable(data, config.timeZone, legStore);
       recordExtras().catch((err) => log(`Extrafahrten: ${err.message}`));

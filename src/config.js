@@ -18,6 +18,16 @@ export const config = {
   gtfsCacheFile: env.GTFS_CACHE_FILE || 'data/gtfs.zip',
   // So oft wird geprüft, ob es eine neue Fahrplan-Version gibt.
   gtfsMaxAgeHours: Number(env.GTFS_MAX_AGE_HOURS || 6),
+  // Fahrpläne der Nachbarländer, um internationale Züge über die Grenze hinaus
+  // zu zeigen (Name=URL, kommagetrennt; leer = aus).
+  foreignGtfs: list(env.FOREIGN_GTFS ?? [
+    'de=https://download.gtfs.de/germany/fv_free/latest.zip',
+    'fr=https://eu.ftp.opendatasoft.com/sncf/plandata/Export_OpenData_SNCF_GTFS_NewTripId.zip',
+  ].join(',')).map((entry) => {
+    const i = entry.indexOf('=');
+    return { name: entry.slice(0, i), url: entry.slice(i + 1) };
+  }),
+  foreignMaxAgeHours: Number(env.FOREIGN_GTFS_MAX_AGE_HOURS || 24),
 
   // GTFS-RT (Trip Updates). Ohne API-Key läuft die Karte rein nach Fahrplan.
   rtUrl: env.GTFS_RT_URL || 'https://api.opentransportdata.swiss/la/gtfs-rt',
