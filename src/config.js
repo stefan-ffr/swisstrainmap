@@ -63,6 +63,8 @@ export const config = {
   alertsLang: env.ALERTS_LANG || 'de',
   // Protokoll der Extrafahrten (Zusatzfahrten aus GTFS-RT) der letzten 2 Tage
   extrasFile: env.EXTRAS_FILE || 'data/extras.json',
+  // Besucherzähler (nur Tageszahlen, keine IP-Adressen)
+  visitorsFile: env.VISITORS_FILE || 'data/visitors.json',
 
   // Gleisnetz aus OpenStreetMap, damit Züge den Strecken entlang fahren.
   railRouting: env.RAIL_ROUTING !== '0',

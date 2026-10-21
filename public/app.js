@@ -286,8 +286,20 @@ function matches(t) {
 
 // --- Daten laden ------------------------------------------------------------
 
+// Zufällige Kennung für den Besucherzähler (keine Cookies, keine Personendaten)
+const clientId = (() => {
+  const make = () => (crypto.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`);
+  try {
+    let id = localStorage.getItem('stm-client');
+    if (!id) { id = make(); localStorage.setItem('stm-client', id); }
+    return id;
+  } catch {
+    return make();
+  }
+})();
+
 async function fetchTrains(params) {
-  const res = await fetch(`api/trains?${new URLSearchParams(params)}`);
+  const res = await fetch(`api/trains?${new URLSearchParams(params)}`, { headers: params.modes === 'rail' ? { 'X-Client': clientId } : {} });
   const body = await res.json();
   if (!res.ok) throw new Error(body.error || res.statusText);
   return body;
@@ -351,6 +363,8 @@ async function pollStatus() {
     if (lg?.error) text += ` · Gleisnetz: ${lg.error}`;
     else if (lg?.running) text += ` · Strecken werden berechnet: ${lg.done}/${lg.total}`;
     else if (lg?.total) text += ` · ${lg.routed}/${lg.total} Abschnitte auf Gleisen`;
+    const v = s.visitors;
+    if (v) text += ` · 👥 ${v.online} online, ${v.today} heute${v.yesterday != null ? `, ${v.yesterday} gestern` : ''}`;
     $('status').textContent = text;
   } catch { /* ignorieren */ }
 }
@@ -620,8 +634,7 @@ $('alerts-btn').addEventListener('click', showAlerts);
 
 // --- Start ------------------------------------------------------------------
 
-poll();
-pollStatus();
+poll().then(pollStatus); // Status erst nach der ersten Abfrage (zählt diesen Besucher mit)
 setInterval(poll, POLL_MS);
 setInterval(pollStatus, 30_000);
 setInterval(animate, ANIM_MS);

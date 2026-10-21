@@ -11,6 +11,7 @@ import { ensureExtractInWorker } from './extract-worker.js';
 import { Timetable } from './timetable.js';
 import { RealtimeStore } from './realtime.js';
 import { AlertStore } from './alerts.js';
+import { Visitors } from './visitors.js';
 import { FormationService, evuOf } from './formation.js';
 import { ReisezuegeStore, classOf, BASE as REISEZUEGE } from './reisezuege.js';
 import { timetableYear, todayKey } from './time.js';
@@ -25,6 +26,10 @@ const log = (msg) => console.log(`[${new Date().toISOString()}] ${msg}`);
 const state = { timetable: null, loading: false, loadedAt: null, loadError: null };
 const realtime = new RealtimeStore();
 const alerts = new AlertStore(config.alertsLang);
+const visitors = new Visitors(path.resolve(root, config.visitorsFile), (ms) => todayKey(ms, config.timeZone), log);
+visitors.load();
+// Beim Beenden (docker stop) Zählerstand sichern
+for (const sig of ['SIGTERM', 'SIGINT']) process.once(sig, () => visitors.save().finally(() => process.exit(0)));
 const drawings = config.drawingsEnabled ? new ReisezuegeStore({ dir: path.resolve(root, config.drawingsDir), bundled: path.resolve(root, config.drawingsBundled), log }) : null;
 const formation = new FormationService({ url: config.formationUrl, apiKey: config.formationApiKey, enabled: config.formationEnabled, log });
 const extraLog = new ExtraLog(path.resolve(root, config.extrasFile), log);
@@ -171,6 +176,7 @@ const server = http.createServer((req, res) => {
   if (url.pathname === '/api/trains') {
     // ?modes=rail,tram,…  &bbox=süd,west,nord,ost – berechnet werden nur Fahrten
     // dieser Verkehrsmittel im Ausschnitt; ohne Angabe: alle, landesweit
+    visitors.seen(req.headers['x-client']);
     if (!tt) return sendJson(req, res, 503, { error: state.loadError || 'Fahrplan wird geladen …' });
     const now = Date.now();
     const modesParam = url.searchParams.get('modes') || '';
@@ -277,6 +283,7 @@ const server = http.createServer((req, res) => {
       alerts: alerts.status,
       formation: formation.status,
       drawings: drawings ? drawings.status : { enabled: false },
+      visitors: visitors.stats(),
       legs: legStore ? { ...legStore.status, enabled: true } : { enabled: false },
     });
   }

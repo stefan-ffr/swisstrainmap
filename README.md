@@ -35,6 +35,9 @@ bekannten Zugradar-Karten – **berechnet**:
    holt der Server erst beim Öffnen der Komposition von reisezuege.ch und speichert es 30 Tage. Passen Anzahl und
    Klassen zur Komposition des Formation Service, steht jede Zeichnung über ihrem Wagen (bei umgekehrter
    Fahrtrichtung gespiegelt), sonst als Streifen „geplante Komposition“.
+   Unten im Panel steht, wie viele Besucher gerade online sind und wie viele heute bzw. gestern da waren. Der
+   Browser schickt dafür eine zufällige Kennung mit; der Server speichert nur Zählerstände (und die Kennungen des
+   laufenden Tages als Hash mit täglich neuem Zufallswert) – keine IP-Adressen, keine Cookies.
 3. Das Gleisnetz der Schweiz wird aus OpenStreetMap geladen (`railway=rail|narrow_gauge|light_rail|funicular`,
    ohne Rangiergleise). Für jedes Paar aufeinanderfolgender Halte sucht der Server per A* den Weg über die
    Gleise – über gerichtete Gleisabschnitte, sodass Züge an Weichen nicht „umkehren“ (max. 70° Richtungsänderung
@@ -155,6 +158,7 @@ Fahrplan und Prognose.
 | `REISEZUEGE` | `1` | `0` = keine Wagenzeichnungen von reisezuege.ch |
 | `REISEZUEGE_DIR` | `data/reisezuege` | Zwischenspeicher der Zugseiten (und nachgeladener Bilder) |
 | `REISEZUEGE_BUNDLED` | `drawings` | Ordner mit den beim Bauen geladenen Zeichnungen |
+| `VISITORS_FILE` | `data/visitors.json` | Besucherzähler: Tageszahlen und Spitzenwert (keine IP-Adressen, keine Cookies) |
 | `ALERTS_LANG` | `de` | Sprache der Meldungen (`de`, `fr`, `it`, `en`) |
 | `RAIL_ROUTING` | `1` | `0` = Gleisnetz nicht verwenden (Luftlinie) |
 | `RAIL_OSM_PATH` | – | Lokale Overpass-JSON-Datei mit dem Gleisnetz (statt Download) |
@@ -180,6 +184,7 @@ Fahrplan und Prognose.
 - `GET /api/extras?day=YYYYMMDD` – Protokoll der Extrafahrten eines Tages (Standard: heute), auch beendete
 - `GET /api/formation/<id>` – Zugkomposition einer Fahrt (Wagenreihung je Halt: Sektor, Klasse, Wagennummer, Angebote, Fahrzeugtyp)
 - `GET /api/drawings/<id>` – geplante Komposition eines Zugs als Wagenzeichnungen (reisezuege.ch); `GET /api/drawing/<datei>` – Zeichnung
+- `GET /api/status` enthält `visitors`: online (letzte Minute), heute, gestern, Spitzenwert und die letzten 30 Tage
 - `GET /api/alerts` – aktive Störungsmeldungen (GTFS-SA) mit betroffenen Linien und Halten, wichtigste zuerst
 - `GET /api/status` – Zustand von Fahrplan- und Echtzeit-Import
 
