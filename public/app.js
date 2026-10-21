@@ -39,8 +39,7 @@ const swisstopo = (layer) => L.tileLayer(`https://wmts.geo.admin.ch/1.0.0/${laye
   maxZoom: 19, maxNativeZoom: 18, attribution: '&copy; <a href="https://www.swisstopo.admin.ch/">swisstopo</a>',
 });
 const baseLayers = {
-  'Landeskarte grau (swisstopo)': swisstopo('ch.swisstopo.pixelkarte-grau'),
-  'Landeskarte farbig (swisstopo)': swisstopo('ch.swisstopo.pixelkarte-farbe'),
+  'Landeskarte (swisstopo)': swisstopo('ch.swisstopo.pixelkarte-farbe'),
   OpenStreetMap: L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: osmAttr }),
 };
 // Bahnnetz als Overlay: offizielle Geodaten des Bundes über swisstopo (frei
@@ -53,7 +52,7 @@ const overlays = {
   'Schienennetz (BAV)': geoadminOverlay('ch.bav.schienennetz', '&copy; <a href="https://www.bav.admin.ch/">BAV</a>'),
   'Gleise swissTLM3D (swisstopo)': geoadminOverlay('ch.swisstopo.swisstlm3d-eisenbahnnetz', '&copy; <a href="https://www.swisstopo.admin.ch/">swisstopo</a>'),
 };
-baseLayers['Landeskarte grau (swisstopo)'].addTo(map);
+baseLayers['Landeskarte (swisstopo)'].addTo(map);
 overlays['Schienennetz (BAV)'].addTo(map);
 L.control.layers(baseLayers, overlays, { position: 'topright' }).addTo(map);
 

@@ -5,7 +5,7 @@ Live-Karte des öffentlichen Verkehrs in der Schweiz – Züge, Trams, Busse, Sc
 - **Fahrplan:** GTFS-Fahrplan von [opentransportdata.swiss](https://opentransportdata.swiss)
 - **Echtzeit:** GTFS-RT Trip Updates (Verspätungen, Ausfälle) von opentransportdata.swiss
 - **Gleisnetz:** OpenStreetMap-Gleise (via Overpass), damit die Züge den Strecken entlang fahren
-- **Karte:** Landeskarte von swisstopo (grau oder farbig) oder OpenStreetMap als Grundkarte, darüber das Schienennetz des BAV bzw. die Gleise aus swissTLM3D (beide über swisstopo). OpenRailwayMap-Kacheln werden nicht mehr eingebunden: deren Nutzungsregeln verlangen bei öffentlichen Karten mit vielen Besuchern einen eigenen Kachelserver
+- **Karte:** farbige Landeskarte von swisstopo oder OpenStreetMap als Grundkarte, darüber das Schienennetz des BAV bzw. die Gleise aus swissTLM3D (beide über swisstopo). OpenRailwayMap-Kacheln werden nicht mehr eingebunden: deren Nutzungsregeln verlangen bei öffentlichen Karten mit vielen Besuchern einen eigenen Kachelserver
 
 ## Wie funktioniert das?
 
