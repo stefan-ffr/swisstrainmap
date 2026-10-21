@@ -9,7 +9,8 @@
 # startet App + Caddy (HTTPS) mit docker compose.
 # Ohne Rückfragen, z. B. für Automatisierung:
 #   DOMAIN=… GTFS_RT_API_KEY=… GTFS_SA_API_KEY=… FORMATION_API_KEY=… bash install.sh
-# Weitere Variablen: INSTALL_DIR (Standard ~/swisstrainmap), BRANCH (main), REPO_URL.
+# Weitere Variablen: INSTALL_DIR (Standard ~/swisstrainmap), BRANCH (main), REPO_URL,
+# AUTO_UPDATE (j/n: alle 10 Minuten neue Versionen von GitHub einspielen).
 set -euo pipefail
 
 REPO_URL="${REPO_URL:-https://github.com/stefan-ffr/swisstrainmap.git}"
@@ -156,6 +157,38 @@ umask 077
 } > .env.new
 mv .env.new .env
 say ".env geschrieben (nur für den Besitzer lesbar)."
+
+# --- Automatische Updates -------------------------------------------------------
+# Der Server schaut alle 10 Minuten auf GitHub nach neuen Commits und baut dann
+# neu (deploy/update.sh). Kein Zugang von GitHub zum Server nötig.
+UPDATE_CMD="/bin/bash $INSTALL_DIR/deploy/update.sh"
+if [ -z "${AUTO_UPDATE:-}" ]; then
+  echo
+  ask AUTO_UPDATE "Automatische Updates (alle 10 Minuten neue Versionen von GitHub einspielen)? [J/n]: "
+fi
+case "${AUTO_UPDATE:-j}" in
+  [nN0]*)
+    if command -v systemctl >/dev/null && systemctl list-unit-files swisstrainmap-update.timer >/dev/null 2>&1; then
+      $SUDO systemctl disable --now swisstrainmap-update.timer >/dev/null 2>&1 || true
+    fi
+    say "Automatische Updates aus." ;;
+  *)
+    if command -v systemctl >/dev/null && [ -d /run/systemd/system ]; then
+      printf '[Unit]\nDescription=Swiss Train Map: neue Version von GitHub einspielen\nAfter=network-online.target docker.service\n\n[Service]\nType=oneshot\nExecStart=%s\n' "$UPDATE_CMD" \
+        | $SUDO tee /etc/systemd/system/swisstrainmap-update.service >/dev/null
+      printf '[Unit]\nDescription=Swiss Train Map: alle 10 Minuten auf Updates prüfen\n\n[Timer]\nOnBootSec=5min\nOnUnitActiveSec=10min\nRandomizedDelaySec=60\n\n[Install]\nWantedBy=timers.target\n' \
+        | $SUDO tee /etc/systemd/system/swisstrainmap-update.timer >/dev/null
+      $SUDO systemctl daemon-reload
+      $SUDO systemctl enable --now swisstrainmap-update.timer >/dev/null
+      say "Automatische Updates an (systemd-Timer; Protokoll: journalctl -u swisstrainmap-update)."
+    elif command -v crontab >/dev/null; then
+      { $SUDO crontab -l 2>/dev/null | grep -v 'deploy/update.sh' || true
+        echo "*/10 * * * * $UPDATE_CMD >>/var/log/swisstrainmap-update.log 2>&1"; } | $SUDO crontab -
+      say "Automatische Updates an (cron; Protokoll: /var/log/swisstrainmap-update.log)."
+    else
+      warn "Weder systemd noch cron gefunden – automatische Updates nicht eingerichtet."
+    fi ;;
+esac
 
 # --- Starten -----------------------------------------------------------------------
 say "Baue und starte die Container …"

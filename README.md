@@ -93,12 +93,21 @@ Das Skript [`deploy/install.sh`](deploy/install.sh)
 1. installiert fehlende Pakete: git, curl, CA-Zertifikate sowie Docker mit Compose-Plugin (über das offizielle
    Skript von get.docker.com, auf Alpine über apk),
 2. lädt den Code nach `~/swisstrainmap` (bzw. aktualisiert ihn bei erneutem Aufruf),
-3. fragt die Domain und den GTFS-RT-API-Key ab – der Key wird bei der Eingabe nicht angezeigt, mit einer
-   einzelnen Abfrage geprüft und in `.env` (nur für den Besitzer lesbar) gespeichert,
-4. startet App und Caddy mit `docker compose up -d --build`.
+3. fragt die Domain und die API-Keys ab (GTFS-RT, GTFS-SA, Train Formation – jedes Produkt hat einen eigenen
+   Key) – Keys werden bei der Eingabe nicht angezeigt, mit je einer Abfrage geprüft und in `.env` (nur für den
+   Besitzer lesbar) gespeichert,
+4. richtet auf Wunsch **automatische Updates** ein (siehe unten),
+5. startet App und Caddy mit `docker compose up -d --build`.
+
+**Automatische Updates:** Ein systemd-Timer (auf Alpine cron) startet alle 10 Minuten
+[`deploy/update.sh`](deploy/update.sh). Gibt es auf GitHub neue Commits, holt das Skript sie (nur Fast-Forward,
+lokale Änderungen werden nie überschrieben) und baut neu; schlägt der Build fehl, läuft die bisherige Version
+weiter. GitHub braucht dafür keinen Zugang zum Server. Protokoll: `journalctl -u swisstrainmap-update`;
+abschalten: `AUTO_UPDATE=n` beim Einzeiler bzw. `sudo systemctl disable --now swisstrainmap-update.timer`.
+Neue Fragen des Installers (z. B. ein weiterer API-Key) beantwortet der Einzeiler, nicht das automatische Update.
 
 Erneut ausführen aktualisiert die Installation; mit Enter bleibt der bisherige Key erhalten. Ohne Rückfragen:
-`DOMAIN=… GTFS_RT_API_KEY=… GTFS_SA_API_KEY=… FORMATION_API_KEY=… bash install.sh`. Weitere Variablen: `INSTALL_DIR`, `BRANCH`.
+`DOMAIN=… GTFS_RT_API_KEY=… GTFS_SA_API_KEY=… FORMATION_API_KEY=… bash install.sh`. Weitere Variablen: `INSTALL_DIR`, `BRANCH`, `AUTO_UPDATE` (`j`/`n`).
 
 **Von Hand:** Voraussetzungen sind Docker mit Compose-Plugin, die Ports 80 und 443 und ein DNS-Eintrag (A/AAAA)
 der Domain auf den Server. Mit allen Verkehrsmitteln braucht der Server im Betrieb rund 1,4 GB RAM und beim einmaligen Erstellen
@@ -112,7 +121,7 @@ docker compose up -d --build
 docker compose logs -f app      # erster Start: Download + Auszug ≈ 3–4 Minuten
 ```
 
-Caddy holt das Zertifikat für die Domain automatisch. Updates: `git pull && docker compose up -d --build`.
+Caddy holt das Zertifikat für die Domain automatisch. Updates: `git pull && docker compose up -d --build` oder `sudo bash deploy/update.sh`.
 
 ### API-Key
 
