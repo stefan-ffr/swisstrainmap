@@ -58,3 +58,17 @@ test('Abfrage mit Zwischenspeicher, 404 und Limit', async () => {
     srv.close();
   }
 });
+
+test('reisezuege.ch: Zugseite, Wochentage, Klassen', async () => {
+  const { parseTrainPage, parseDays, classOf } = await import('../src/reisezuege.js');
+  const page = '<p>Fahrplanperioden</p><table><tr><td class="mainfont" style="width: 824px; color: red;"><b>Montag - Freitag<br />'
+    + '<img src="images/zugbilder/x_at_v.jpg" onclick="getdetail(\'getwagendetail.php?tfah_id=1&amp;fpos=1\');" alt="SBB RABe 501 At2" />'
+    + '<img src="images/zugbilder/x_wr.jpg" onclick="getdetail(\'getwagendetail.php?tfah_id=2&amp;fpos=2\');" alt="SBB RABe 501 WR6" />'
+    + '<td class="mainfont" style="width: 824px; color: red;"><b>Samstag, Sonntag<br />'
+    + '<img src="images/zugbilder/re460.jpg" onclick="getdetail(\'getwagendetail.php?tfah_id=3\');" alt="SBB Re 460" /></table>';
+  const blocks = parseTrainPage(page);
+  assert.deepEqual(blocks.map((b) => b.days), [[1, 2, 3, 4, 5], [0, 6]]);
+  assert.deepEqual(blocks[0].wagons[0], { file: 'x_at_v.jpg', id: 1, name: 'SBB RABe 501 At2' });
+  assert.equal(parseDays('täglich'), null);
+  assert.deepEqual(['SBB RABe 501 At2', 'SBB IC2000 AB', 'SBB EW IV WRm', 'SBB EW IV B', 'SBB Re 460', 'TPF B (Domino)'].map(classOf), ['1', '12', 'WR', '2', 'LK', '2']);
+});

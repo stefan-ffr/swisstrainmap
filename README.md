@@ -5,7 +5,7 @@ Live-Karte des öffentlichen Verkehrs in der Schweiz – Züge, Trams, Busse, Sc
 - **Fahrplan:** GTFS-Fahrplan von [opentransportdata.swiss](https://opentransportdata.swiss)
 - **Echtzeit:** GTFS-RT Trip Updates (Verspätungen, Ausfälle) von opentransportdata.swiss
 - **Gleisnetz:** OpenStreetMap-Gleise (via Overpass), damit die Züge den Strecken entlang fahren
-- **Karte:** Landeskarte von swisstopo (grau oder farbig) oder OpenStreetMap als Grundkarte, darüber [OpenRailwayMap](https://www.openrailwaymap.org) (Infrastruktur, Höchstgeschwindigkeiten, Signale, Elektrifizierung)
+- **Karte:** Landeskarte von swisstopo (grau oder farbig) oder OpenStreetMap als Grundkarte, darüber das Schienennetz des BAV bzw. die Gleise aus swissTLM3D (beide über swisstopo). OpenRailwayMap-Kacheln werden nicht mehr eingebunden: deren Nutzungsregeln verlangen bei öffentlichen Karten mit vielen Besuchern einen eigenen Kachelserver
 
 ## Wie funktioniert das?
 
@@ -29,6 +29,15 @@ bekannten Zugradar-Karten – **berechnet**:
    Klassen, Wagennummern, Rollstuhl-/Velo-/Familienplätze, Fahrzeugtyp). Abgefragt wird nur auf Klick, mit
    10 Minuten Zwischenspeicher und Sperre vor dem Limit (50/min, 20 000/Tag). Betreiber: SBB, BLS, SOB, Thurbo,
    RhB, TPF, transN, MBC, zb, ÖBB.
+   Dazu zeigt die Komposition die Wagen als Seitenansicht: Zeichnungen von [reisezuege.ch](https://www.reisezuege.ch)
+   (Markus Blaser), mit seiner Erlaubnis verwendet. Die 233 Zeichnungen (2,4 MB) lädt der Docker-Build einmal ins
+   Image (`scripts/fetch-drawings.js`, 1 Abfrage/s, beim ersten Build ≈ 5–10 Minuten). Welche Wagen ein Zug führt,
+   holt der Server erst beim Öffnen der Komposition von reisezuege.ch und speichert es 30 Tage. Passen Anzahl und
+   Klassen zur Komposition des Formation Service, steht jede Zeichnung über ihrem Wagen (bei umgekehrter
+   Fahrtrichtung gespiegelt), sonst als Streifen „geplante Komposition“.
+   Unten im Panel steht, wie viele Besucher gerade online sind und wie viele heute bzw. gestern da waren. Der
+   Browser schickt dafür eine zufällige Kennung mit; der Server speichert nur Zählerstände (und die Kennungen des
+   laufenden Tages als Hash mit täglich neuem Zufallswert) – keine IP-Adressen, keine Cookies.
 3. Das Gleisnetz der Schweiz wird aus OpenStreetMap geladen (`railway=rail|narrow_gauge|light_rail|funicular`,
    ohne Rangiergleise). Für jedes Paar aufeinanderfolgender Halte sucht der Server per A* den Weg über die
    Gleise – über gerichtete Gleisabschnitte, sodass Züge an Weichen nicht „umkehren“ (max. 70° Richtungsänderung
@@ -146,6 +155,10 @@ Fahrplan und Prognose.
 | `FORMATION_API_KEY` | – | API-Key für den Train Formation Service (Zugkomposition; eigenes Produkt). Ohne Key kein Knopf „Komposition“ |
 | `FORMATION_URL` | `…/formation/v1/formations_full` | Endpunkt der Zugkomposition |
 | `FORMATION_ENABLED` | – | `1` = auch ohne eigenen Key abfragen (Proxy ergänzt die Authentisierung) |
+| `REISEZUEGE` | `1` | `0` = keine Wagenzeichnungen von reisezuege.ch |
+| `REISEZUEGE_DIR` | `data/reisezuege` | Zwischenspeicher der Zugseiten (und nachgeladener Bilder) |
+| `REISEZUEGE_BUNDLED` | `drawings` | Ordner mit den beim Bauen geladenen Zeichnungen |
+| `VISITORS_FILE` | `data/visitors.json` | Besucherzähler: Tageszahlen und Spitzenwert (keine IP-Adressen, keine Cookies) |
 | `ALERTS_LANG` | `de` | Sprache der Meldungen (`de`, `fr`, `it`, `en`) |
 | `RAIL_ROUTING` | `1` | `0` = Gleisnetz nicht verwenden (Luftlinie) |
 | `RAIL_OSM_PATH` | – | Lokale Overpass-JSON-Datei mit dem Gleisnetz (statt Download) |
@@ -170,6 +183,8 @@ Fahrplan und Prognose.
 - `GET /api/trip/<tripId>|<YYYYMMDD>` – Halteliste mit Soll- und Prognosezeiten und Streckenverlauf
 - `GET /api/extras?day=YYYYMMDD` – Protokoll der Extrafahrten eines Tages (Standard: heute), auch beendete
 - `GET /api/formation/<id>` – Zugkomposition einer Fahrt (Wagenreihung je Halt: Sektor, Klasse, Wagennummer, Angebote, Fahrzeugtyp)
+- `GET /api/drawings/<id>` – geplante Komposition eines Zugs als Wagenzeichnungen (reisezuege.ch); `GET /api/drawing/<datei>` – Zeichnung
+- `GET /api/status` enthält `visitors`: online (letzte Minute), heute, gestern, Spitzenwert und die letzten 30 Tage
 - `GET /api/alerts` – aktive Störungsmeldungen (GTFS-SA) mit betroffenen Linien und Halten, wichtigste zuerst
 - `GET /api/status` – Zustand von Fahrplan- und Echtzeit-Import
 
@@ -214,5 +229,5 @@ test/                      Tests (npm test)
 
 ## Lizenzen der Daten
 
-- Fahrplan- und Echtzeitdaten: opentransportdata.swiss (Nutzungsbedingungen beachten); Ausland: gtfs.de / DELFI e.V. (CC BY 4.0), SNCF (Open Data), ÖBB (data.oebb.at, CC BY 4.0), Trenitalia über den italienischen NAP / deryclem/trenitalia-gtfs (CC BY 4.0); Landesgrenze © OpenStreetMap-Mitwirkende (ODbL)
-- Kartendaten: © swisstopo, © OpenStreetMap-Mitwirkende (ODbL), OpenRailwayMap (CC-BY-SA)
+- Fahrplan- und Echtzeitdaten: opentransportdata.swiss (Nutzungsbedingungen beachten); Ausland: gtfs.de / DELFI e.V. (CC BY 4.0), SNCF (Open Data), ÖBB (data.oebb.at, CC BY 4.0), Trenitalia über den italienischen NAP / deryclem/trenitalia-gtfs (CC BY 4.0); Landesgrenze © OpenStreetMap-Mitwirkende (ODbL); Wagenzeichnungen © reisezuege.ch (Markus Blaser), mit Erlaubnis
+- Kartendaten: © swisstopo, Schienennetz © BAV, © OpenStreetMap-Mitwirkende (ODbL)

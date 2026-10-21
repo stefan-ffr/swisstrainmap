@@ -89,3 +89,14 @@ html, body { margin: 0; height: 100%; font: 14px/1.4 system-ui, -apple-system, "
 #formation .wagon .offers { display: block; min-height: 1.2em; font-size: 11px; }
 #formation .sector { position: absolute; top: -16px; left: 0; font-size: 11px; color: var(--muted); }
 #formation select { font: inherit; }
+#formation .train.wide { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; }
+/* Zeichnungen von reisezuege.ch: JPG auf schwarzem Grund -> dunkles Band */
+#formation .train.wide { gap: 0; padding-top: 16px; margin-top: 2px; }
+#formation .wagon.drawn { min-width: 116px; padding: 0 0 3px; border-radius: 0; border-width: 0 1px 0 0; }
+#formation .wagon.drawn.first { border-top-width: 4px; }
+#formation .wagon.drawn img.draw { width: 100%; height: 26px; object-fit: contain; background: #000; margin: 0 0 3px; }
+#formation img.draw { display: block; }
+#formation img.flip { transform: scaleX(-1); }
+#formation .strip { display: flex; overflow-x: auto; background: #000; border-radius: 4px; margin: 6px 0 2px; }
+#formation .strip img.draw { height: 26px; width: auto; }
+#formation .credit a { color: inherit; }
