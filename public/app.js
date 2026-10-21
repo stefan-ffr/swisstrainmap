@@ -43,18 +43,18 @@ const baseLayers = {
   'Landeskarte farbig (swisstopo)': swisstopo('ch.swisstopo.pixelkarte-farbe'),
   OpenStreetMap: L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: osmAttr }),
 };
-const ormAttr = `${osmAttr} · Bahninfrastruktur: <a href="https://www.openrailwaymap.org/">OpenRailwayMap</a> (CC-BY-SA)`;
-const orm = (style) => L.tileLayer(`https://{s}.tiles.openrailwaymap.org/${style}/{z}/{x}/{y}.png`, {
-  subdomains: 'abc', maxZoom: 19, tileSize: 256, attribution: ormAttr,
+// Bahnnetz als Overlay: offizielle Geodaten des Bundes über swisstopo (frei
+// nutzbar mit Quellenangabe). OpenRailwayMap verlangt bei solcher Nutzung
+// einen eigenen Kachelserver und sperrt sonst die Domain.
+const geoadminOverlay = (layer, attribution) => L.tileLayer(`https://wmts.geo.admin.ch/1.0.0/${layer}/default/current/3857/{z}/{x}/{y}.png`, {
+  maxZoom: 19, maxNativeZoom: 18, attribution,
 });
 const overlays = {
-  'OpenRailwayMap: Infrastruktur': orm('standard'),
-  'OpenRailwayMap: Höchstgeschwindigkeit': orm('maxspeed'),
-  'OpenRailwayMap: Signale': orm('signals'),
-  'OpenRailwayMap: Elektrifizierung': orm('electrification'),
+  'Schienennetz (BAV)': geoadminOverlay('ch.bav.schienennetz', '&copy; <a href="https://www.bav.admin.ch/">BAV</a>'),
+  'Gleise swissTLM3D (swisstopo)': geoadminOverlay('ch.swisstopo.swisstlm3d-eisenbahnnetz', '&copy; <a href="https://www.swisstopo.admin.ch/">swisstopo</a>'),
 };
 baseLayers['Landeskarte grau (swisstopo)'].addTo(map);
-overlays['OpenRailwayMap: Infrastruktur'].addTo(map);
+overlays['Schienennetz (BAV)'].addTo(map);
 L.control.layers(baseLayers, overlays, { position: 'topright' }).addTo(map);
 
 const trainLayer = L.layerGroup().addTo(map);
